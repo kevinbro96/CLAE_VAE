@@ -14,12 +14,16 @@ import os
 import argparse
 import time
 import numpy as np
-import models
 import datasets
 import math
+import wandb
 
 from utils import *
-
+sys.path.append('.')
+sys.path.append('..')
+from vae import *
+from set import *
+import models
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--lr', default=0.03, type=float, help='learning rate')
@@ -41,29 +45,42 @@ parser.add_argument('--batch-size', default=128, type=int,
                     metavar='B', help='training batch size')
 parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
-
 parser.add_argument('--dataset', default='cifar10',  help='cifar10, cifar100, tinyImagenet')
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
-parser.add_argument('--trial', type=int, help='trial')
 parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
-parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial')
+parser.add_argument('--eps', default=1.0, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
-args = parser.parse_args() 
-
+parser.add_argument('--vae_path',
+                    default='../results/autoaug_new_8_0.5/model_epoch132.pth',
+                    type=str, help='vae_path')
+parser.add_argument('--seed', default=1, type=int, help='seed')
+parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
+args = parser.parse_args()
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-def gen_adv(model, x):
-    x.detach()
-    inputs1_adv = Variable(x, requires_grad=True).to(device)
+
+def gen_adv(net, vae, x):
+
+    with torch.no_grad():
+        z, gx, _, _ = vae(x)
+
+    variable_bottle = Variable(z.detach(), requires_grad=True)
+    adv_gx = vae(variable_bottle, True)
+    inputs_adv = adv_gx + (x - gx).detach()
     # generate adversarial example
-    tmp_loss = CL(net, x, inputs1_adv, gen_adv = True)
+    tmp_loss = CL(net, inputs_adv, x, gen_adv=True)
     tmp_loss.backward()
-    inputs1_adv.data = inputs1_adv.data + (args.eps * torch.sign(inputs1_adv.grad.data))
-    inputs1_adv.grad.data.zero_()
-    inputs1_adv.detach()
-    return inputs1_adv
+
+    with torch.no_grad():
+        sign_grad = variable_bottle.grad.data.sign()
+        variable_bottle = variable_bottle + args.eps * sign_grad
+        adv_gx = vae(variable_bottle, True)
+        inputs_adv = adv_gx + (x - gx).detach()
+    inputs_adv.detach()
+    return inputs_adv, gx
 
 
 def CL(model, x1, x2, adv=False, gen_adv = False):
@@ -71,8 +88,8 @@ def CL(model, x1, x2, adv=False, gen_adv = False):
         x1_feat = model(x1, adv=True)
         x2_feat = model(x2, adv=True)
     else:
-        x1_feat = model(x1)
-        x2_feat = model(x2, adv=adv)
+        x1_feat = model(x1, adv=adv)
+        x2_feat = model(x2)
     #prototype set 1
     x1_x2_mat = torch.exp(torch.matmul(x1_feat,x2_feat.t())/args.batch_t)
     denominator1 = torch.sum(x1_x2_mat, dim = 1).view(x1.shape[0],1)
@@ -81,7 +98,6 @@ def CL(model, x1, x2, adv=False, gen_adv = False):
     loss = -torch.mean(torch.log(prob1_diag))
     
     return loss
-
 
 
 dataset = args.dataset
@@ -102,10 +118,10 @@ suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.bat
 
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
+    suffix = suffix + '_bn_adv_momentum_{}seed{}'.format(args.bn_adv_momentum, args.seed)
 else:
-    suffix = suffix + '_trial_{}'.format(args.trial)
-
+    suffix = suffix + 'seed{}'.format(args.seed)
+wandb.init(config=args, name=suffix.replace("_log/", ''))
 if len(args.resume)>0:
     suffix = suffix + '_r'
 
@@ -143,20 +159,20 @@ transform_test = transforms.Compose([
 
 if dataset =='cifar10':
     # cifar-10 dataset
-    trainset = datasets.CIFAR10Instance(root='../datasets', train=True, download=True, transform=transform_train)
+    trainset = datasets.CIFAR10Instance(root='../../data', train=True, download=True, transform=transform_train)
     trainloader = torch.utils.data.DataLoader(trainset,
         batch_size=args.batch_size, shuffle=True, num_workers=4,drop_last =True)
 
-    testset = datasets.CIFAR10Instance(root='../datasets', train=False, download=True, transform=transform_test)
+    testset = datasets.CIFAR10Instance(root='../../data', train=False, download=True, transform=transform_test)
     testloader = torch.utils.data.DataLoader(testset,
         batch_size=100, shuffle=False, num_workers=4)
 elif dataset =='cifar100':
     # cifar-10 dataset
-    trainset = datasets.CIFAR100Instance(root='../datasets', train=True, download=True, transform=transform_train)
+    trainset = datasets.CIFAR100Instance(root='../../data', train=True, download=True, transform=transform_train)
     trainloader = torch.utils.data.DataLoader(trainset,
         batch_size=args.batch_size, shuffle=True, num_workers=4,drop_last =True)
 
-    testset = datasets.CIFAR100Instance(root='../datasets', train=False, download=True, transform=transform_test)
+    testset = datasets.CIFAR100Instance(root='../../data', train=False, download=True, transform=transform_test)
     testloader = torch.utils.data.DataLoader(testset,
         batch_size=100, shuffle=False, num_workers=4)
 
@@ -169,14 +185,17 @@ else:
     net = models.__dict__[args.resnet + '_cifar'](pool_len = pool_len, low_dim=args.low_dim, bn_adv_flag=False)
 
 # define leminiscate: inner product within each mini-batch (Ours)
-
+vae = CVAE_cifar_withbn(128, args.dim)
+vae.load_state_dict(torch.load(args.vae_path))
 if device == 'cuda':
     net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
+    vae = torch.nn.DataParallel(vae, device_ids=range(torch.cuda.device_count()))
     cudnn.benchmark = True
 
 
-
 net.to(device)
+vae.to(device)
+vae.eval()
 
    
 if args.test_only:
@@ -186,6 +205,34 @@ if args.test_only:
     
 # define optimizer
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+
+
+def write_images(epoch, net, vae, trainloader, batch_num=1, batch_size=64):
+    for batch_idx, (inputs1, inputs2, _, indexes) in enumerate(trainloader):
+        if batch_idx >= batch_num:
+            break
+        else:
+            inputs1, inputs2, indexes = inputs1.cuda(), inputs2.cuda(), indexes.cuda()
+            if args.adv:
+                inputs_adv, gx = gen_adv(net, vae, inputs1)
+                grid_X = torchvision.utils.make_grid(inputs1[:batch_size].data, nrow=8, padding=2, normalize=True)
+                wandb.log({"_Batch_{batch}_X.jpg".format(batch=batch_idx): [
+                    wandb.Image(grid_X)]}, commit=False)
+                grid_GX = torchvision.utils.make_grid(gx[:batch_size].data, nrow=8, padding=2, normalize=True)
+                wandb.log({"_Batch_{batch}_GX.jpg".format(batch=batch_idx): [
+                    wandb.Image(grid_GX)]}, commit=False)
+                grid_AdvX = torchvision.utils.make_grid((inputs_adv[:batch_size]).data, nrow=8, padding=2,
+                                                        normalize=True)
+                wandb.log({"_Batch_{batch}_AdvX.jpg".format(batch=batch_idx): [
+                    wandb.Image(grid_AdvX)]}, commit=False)
+                grid_Delta = torchvision.utils.make_grid(((inputs_adv-inputs1)[:batch_size]).data, nrow=8, padding=2,
+                                                        normalize=True)
+                wandb.log({"_Batch_{batch}_Delta.jpg".format(batch=batch_idx): [wandb.Image(grid_Delta)]}, commit=False)
+                grid_RX = torchvision.utils.make_grid((inputs1-gx)[:batch_size].data, nrow=8, padding=2, normalize=True)
+                wandb.log({"_Batch_{batch}_RX.jpg".format(batch=batch_idx): [wandb.Image(grid_RX)]}, commit=False)
+                wandb.log({'l2_norm': torch.mean((inputs_adv - inputs1).reshape(inputs1.shape[0], -1).norm(dim=1)),
+                           'linf_norm': torch.mean((inputs_adv - inputs1).reshape(inputs1.shape[0], -1).abs().max(dim=1)[0])})
+
 
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed at 120, 160 and 200"""
@@ -198,7 +245,8 @@ def adjust_learning_rate(optimizer, epoch):
         lr = args.lr * 0.01
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-    
+
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -217,14 +265,17 @@ def train(epoch):
         inputs1, inputs2, indexes = inputs1.to(device), inputs2.to(device), indexes.to(device)
         
         if args.adv:
-            inputs_adv = gen_adv(net,inputs1)
+            inputs_adv, gx = gen_adv(net, vae, inputs1)
         
         
         optimizer.zero_grad()
-        loss = CL(net, inputs1, inputs2)
-        
+        loss_og = CL(net, inputs1, inputs2)
+        loss = loss_og
         if args.adv:
-            loss += args.alpha*CL(net, inputs1, inputs_adv, adv=True)
+            loss_adv = CL(net, inputs_adv, inputs2, adv=True)
+            loss += args.alpha*loss_adv
+        else:
+            loss_adv = loss_og
             
         
         loss.backward()
@@ -236,6 +287,9 @@ def train(epoch):
         end = time.time()
         
         if batch_idx%10 ==0:
+            wandb.log({'loss_og': loss_og.item(),
+                       'loss_adv': loss_adv.item(),
+                       'lr': optimizer.param_groups[0]['lr']})
             print('Epoch: [{}][{}/{}] '
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
@@ -253,6 +307,7 @@ for epoch in range(start_epoch, start_epoch+301):
     # testing every test_epoch
     if epoch%test_epoch ==0:
         net.eval()
+        write_images(epoch, net, vae, trainloader)
         print('----------Evaluation---------')
         start = time.time()
         
@@ -277,6 +332,7 @@ for epoch in range(start_epoch, start_epoch+301):
         print('accuracy: {}% \t (best acc: {}%)'.format(acc,best_acc))
         print('[Epoch]: {}'.format(epoch), file = test_log_file)
         print('accuracy: {}% \t (best acc: {}%)'.format(acc,best_acc), file = test_log_file)
+        wandb.log({'acc': acc})
         test_log_file.flush()
 
     if args.debug:
