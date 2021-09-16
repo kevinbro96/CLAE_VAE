@@ -125,7 +125,7 @@ if not os.path.isdir(log_dir):
     os.makedirs(log_dir)
 
 suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.batch_size, args.low_dim)
-
+suffix = suffix + 'dim{}'.format(args.dim)
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
     suffix = suffix + '_bn_adv_momentum_{}seed{}'.format(args.bn_adv_momentum, args.seed)

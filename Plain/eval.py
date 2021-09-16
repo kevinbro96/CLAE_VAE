@@ -45,7 +45,7 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 parser.add_argument('--logistic_epochs', default=1000, type=int, metavar='B', help='training batch size')
 parser.add_argument('--logistic_batch_size', default=128, type=int, metavar='B', help='training batch size')
-
+parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
 
 parser.add_argument('--dataset', default='cifar10',  help='cifar10, cifar100')
 parser.add_argument('--trial', type=int, help='trial')
@@ -90,7 +90,7 @@ if not os.path.isdir(args.model_dir + '/' + dataset + '_eval'):
     os.makedirs(args.model_dir + '/' + dataset + '_eval')
 
 suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.batch_size, args.low_dim)
-
+suffix = suffix + 'dim{}'.format(args.dim)
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
     suffix = suffix + '_bn_adv_momentum_{}seed{}'.format(args.bn_adv_momentum, args.seed)
