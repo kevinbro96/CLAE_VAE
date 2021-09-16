@@ -18,7 +18,9 @@ import numpy as np
 import models
 import datasets
 import math
-
+sys.path.append('.')
+sys.path.append('..')
+from set import *
 from utils import *
 
 
@@ -53,8 +55,9 @@ parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
+parser.add_argument('--seed', default=1, type=int, help='seed')
 args = parser.parse_args() 
-
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 dataset = args.dataset
@@ -90,9 +93,9 @@ suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.bat
 
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
+    suffix = suffix + '_bn_adv_momentum_{}seed{}'.format(args.bn_adv_momentum, args.seed)
 else:
-    suffix = suffix + '_trial_{}'.format(args.trial)
+    suffix = suffix + 'seed{}'.format(args.seed)
 
 print(suffix)
 # log the output
