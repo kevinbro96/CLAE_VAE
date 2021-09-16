@@ -17,10 +17,15 @@ import numpy as np
 import models
 import datasets
 import math
+import wandb
 
 from BatchAverage import BatchCriterion
 from utils import *
-
+sys.path.append('.')
+sys.path.append('..')
+from vae import *
+from set import *
+import models
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--lr', default=0.03, type=float, help='learning rate')
@@ -45,28 +50,39 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
 
 parser.add_argument('--dataset', default='cifar10',  help='cifar10, cifar100, tinyImagenet')
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
-parser.add_argument('--trial', type=int, help='trial')
 parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
 parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
+parser.add_argument('--vae_path',
+                    default='../results/autoaug_new_8_0.5/model_epoch132.pth',
+                    type=str, help='vae_path')
+parser.add_argument('--seed', default=1, type=int, help='seed')
+parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
 args = parser.parse_args() 
-
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
-def gen_adv(model, x, criterion, indexes):
-    x_adv = Variable(x, requires_grad=True).to(device)
+
+def gen_adv(model, vae, x, criterion, indexes):
+    with torch.no_grad():
+        z, gx, _, _ = vae(x)
+    variable_bottle = Variable(z.detach(), requires_grad=True)
+    adv_gx = vae(variable_bottle, True)
+    x_adv = adv_gx + (x - gx).detach()
     adv_feat = model(x_adv, adv = True)
     clean_feat = model(x, adv = True)
     features = torch.cat((clean_feat,adv_feat), 0)    
     tmp_loss = criterion(features, indexes)
     tmp_loss.backward()
     # generate adversarial example
-    x_adv.data = x_adv.data + (args.eps * torch.sign(x_adv.grad.data))
-    x_adv.grad.data.zero_()
-    x_adv.requires_grad = False
-    return x_adv
+    with torch.no_grad():
+        sign_grad = variable_bottle.grad.data.sign()
+        variable_bottle = variable_bottle + args.eps * sign_grad
+        adv_gx = vae(variable_bottle, True)
+    x_adv.data = adv_gx + (x - gx).detach()
+    return  x_adv.detach(), gx
 
 
 dataset = args.dataset
@@ -83,14 +99,14 @@ test_epoch = args.test_epoch
 if not os.path.isdir(log_dir):
     os.makedirs(log_dir)
     
-suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.batch_size, args.low_dim)
-
+suffix = args.dataset + '_{}_batch_{}_embed_'.format(args.resnet, args.batch_size)
+suffix = suffix + 'dim{}'.format(args.dim)
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
+    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
 else:
-    suffix = suffix + '_trial_{}'.format(args.trial)
-
+    suffix = suffix + '_seed_{}'.format(args.seed)
+wandb.init(config=args, name='train'+suffix.replace("_log/", ''))
 if len(args.resume)>0:
     suffix = suffix + '_r'
 
@@ -126,20 +142,20 @@ transform_test = transforms.Compose([
 ])
 if dataset =='cifar10':
     # cifar-10 dataset
-    trainset = datasets.CIFAR10Instance(root='../datasets', train=True, download=True, transform=transform_train)
+    trainset = datasets.CIFAR10Instance(root='../../data', train=True, download=True, transform=transform_train)
     trainloader = torch.utils.data.DataLoader(trainset,
         batch_size=args.batch_size, shuffle=True, num_workers=4,drop_last =True)
 
-    testset = datasets.CIFAR10Instance(root='../datasets', train=False, download=True, transform=transform_test)
+    testset = datasets.CIFAR10Instance(root='../../data', train=False, download=True, transform=transform_test)
     testloader = torch.utils.data.DataLoader(testset,
         batch_size=100, shuffle=False, num_workers=4)
 elif dataset =='cifar100':
     # cifar-10 dataset
-    trainset = datasets.CIFAR100Instance(root='../datasets', train=True, download=True, transform=transform_train)
+    trainset = datasets.CIFAR100Instance(root='../../data', train=True, download=True, transform=transform_train)
     trainloader = torch.utils.data.DataLoader(trainset,
         batch_size=args.batch_size, shuffle=True, num_workers=4,drop_last =True)
 
-    testset = datasets.CIFAR100Instance(root='../datasets', train=False, download=True, transform=transform_test)
+    testset = datasets.CIFAR100Instance(root='../../data', train=False, download=True, transform=transform_test)
     testloader = torch.utils.data.DataLoader(testset,
         batch_size=100, shuffle=False, num_workers=4)
 
@@ -152,9 +168,11 @@ else:
     net = models.__dict__[args.resnet + '_cifar'](pool_len = pool_len, low_dim=args.low_dim, bn_adv_flag=False)
 
 # define leminiscate: inner product within each mini-batch (Ours)
-
+vae = CVAE_cifar_withbn(128, args.dim)
+vae.load_state_dict(torch.load(args.vae_path))
 if device == 'cuda':
     net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
+    vae = torch.nn.DataParallel(vae, device_ids=range(torch.cuda.device_count()))
     cudnn.benchmark = True
 
 
@@ -163,6 +181,8 @@ criterion = BatchCriterion(args.batch_m, args.batch_t, args.batch_size)
 
 net.to(device)
 criterion.to(device)
+vae.to(device)
+vae.eval()
 
 if args.test_only or len(args.resume)>0:
     # Load checkpoint.
@@ -182,6 +202,23 @@ if args.test_only:
 # define optimizer
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
 
+
+def reconst_images(x_i, gx, x_j_adv):
+    grid_X = torchvision.utils.make_grid(x_i[32:96].data, nrow=8, padding=2, normalize=True)
+    wandb.log({"X.jpg": [wandb.Image(grid_X)]}, commit=False)
+    grid_GX = torchvision.utils.make_grid(gx[32:96].data, nrow=8, padding=2, normalize=True)
+    wandb.log({"GX.jpg": [wandb.Image(grid_GX)]}, commit=False)
+    grid_RX = torchvision.utils.make_grid((x_i[32:96] - gx[32:96]).data, nrow=8, padding=2, normalize=True)
+    wandb.log({"RX.jpg": [wandb.Image(grid_RX)]}, commit=False)
+    grid_AdvX = torchvision.utils.make_grid(x_j_adv[32:96].data, nrow=8, padding=2, normalize=True)
+    wandb.log({"AdvX.jpg": [wandb.Image(grid_AdvX)]}, commit=False)
+    grid_delta = torchvision.utils.make_grid((x_j_adv - x_i)[32:96].data, nrow=8, padding=2, normalize=True)
+    wandb.log({"Delta.jpg": [wandb.Image(grid_delta)]}, commit=False)
+    wandb.log({'l2_norm': torch.mean((x_j_adv - x_i).reshape(x_i.shape[0], -1).norm(dim=1)),
+               'linf_norm': torch.mean((x_j_adv - x_i).reshape(x_i.shape[0], -1).abs().max(dim=1)[0])
+               }, commit=False)
+
+
 def adjust_learning_rate(optimizer, epoch):
     """Sets the learning rate to the initial LR decayed at 120, 160 and 200"""
     lr = args.lr
@@ -193,7 +230,8 @@ def adjust_learning_rate(optimizer, epoch):
         lr = args.lr * 0.01
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
-    
+
+
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
@@ -212,19 +250,20 @@ def train(epoch):
         inputs1, inputs2, indexes = inputs1.to(device), inputs2.to(device), indexes.to(device)
         
         if args.adv:
-            inputs_adv = gen_adv(net,inputs1, criterion, indexes)
-        
+            inputs_adv, _ = gen_adv(net, vae, inputs1, criterion, indexes)
         
         optimizer.zero_grad()
         inputs1_feat = net(inputs1)
         inputs2_feat = net(inputs2)
         features = torch.cat((inputs1_feat,inputs2_feat), 0)
-        loss = criterion(features, indexes)
-        
+        loss_og = criterion(features, indexes)
+        loss = loss_og
         if args.adv:
             adv_feat = net(inputs_adv,adv=True)
-            loss += args.alpha*criterion(torch.cat((inputs1_feat, adv_feat), 0), indexes)
-            
+            loss_adv = criterion(torch.cat((inputs1_feat, adv_feat), 0), indexes)
+            loss += args.alpha * loss_adv
+        else:
+            loss_adv = loss_og
         
         loss.backward()
         optimizer.step()
@@ -235,14 +274,23 @@ def train(epoch):
         end = time.time()
         
         if batch_idx%10 ==0:
+            wandb.log({'loss_og': loss_og.item(),
+                       'loss_adv': loss_adv.item(),
+                       'lr': optimizer.param_groups[0]['lr']})
             print('Epoch: [{}][{}/{}] '
                   'Time: {batch_time.val:.3f} ({batch_time.avg:.3f}) '
                   'Data: {data_time.val:.3f} ({data_time.avg:.3f}) '
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
                   epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
+        if args.global_step % 3000 == 0:
+            if args.adv:
+                reconst_images(inputs1, gx, inputs_adv)
         if args.debug:
-            break 
+            break
+        args.global_step += 1
 
+
+args.global_step = 0
 best_acc = 0   
 for epoch in range(start_epoch, start_epoch+301):
     

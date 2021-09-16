@@ -10,7 +10,7 @@ import torch.backends.cudnn as cudnn
 
 import torchvision
 import torchvision.transforms as transforms
-
+import wandb
 import os
 import argparse
 import time
@@ -19,6 +19,9 @@ import models
 import datasets
 import math
 
+sys.path.append('.')
+sys.path.append('..')
+from set import *
 from utils import *
 
 
@@ -53,11 +56,13 @@ parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
+parser.add_argument('--seed', default=1, type=int, help='seed')
 args = parser.parse_args() 
-
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 dataset = args.dataset
+
 
 class LogisticRegression(nn.Module):
     
@@ -86,14 +91,14 @@ if not os.path.isdir(args.model_dir):
 if not os.path.isdir(args.model_dir + '/' + dataset + '_eval'):
     os.makedirs(args.model_dir + '/' + dataset + '_eval')
 
-suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.batch_size, args.low_dim)
-
+suffix = args.dataset + '_{}_batch_{}_embed_'.format(args.resnet, args.batch_size)
+suffix = suffix + 'dim{}'.format(args.dim)
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
+    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
 else:
-    suffix = suffix + '_trial_{}'.format(args.trial)
-
+    suffix = suffix + '_seed_{}'.format(args.seed)
+wandb.init(config=args, name='LR'+suffix.replace("_log/", ''))
 print(suffix)
 # log the output
 test_log_file = open(log_dir + suffix + '.txt', "w")                
@@ -112,7 +117,7 @@ transform = transforms.Compose([
     transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
 ])
 
-root='../datasets'
+root='../../data'
 if args.dataset == "cifar10":
     train_dataset = torchvision.datasets.CIFAR10(
         root, train=True, download=True, transform=transform) 
@@ -235,6 +240,8 @@ for epoch in range(args.logistic_epochs):
     loss_epoch, accuracy_epoch = train(train_loader, net, model, criterion, optimizer)
     print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)), file = test_log_file)
     print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)))
+    wandb.log({'Train/Loss': loss_epoch / len(train_loader),
+               'Train/ACC': accuracy_epoch / len(train_loader)})
     test_log_file.flush()
     # final testing
     test_loss_epoch, test_accuracy_epoch = test(test_loader, net, model, criterion, optimizer)
@@ -246,6 +253,9 @@ for epoch in range(args.logistic_epochs):
         torch.save(net, args.model_dir + '/' + dataset + '_eval/' + suffix + '_eval_best.t')
     print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc), file = test_log_file)
     print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc))
+    wandb.log({'Test/Loss': test_loss_epoch / len(test_loader),
+               'Test/ACC': test_current_acc,
+              'Test/BestACC': best_acc})
     test_log_file.flush()
     
     if args.debug:

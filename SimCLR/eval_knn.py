@@ -2,14 +2,19 @@ import torch
 import torchvision
 import torchvision.transforms as transforms
 import argparse
-
+import sys
 import os
 #from experiment import ex
 from model import load_model, save_model
-
+import wandb
 from modules import LogisticRegression
 import numpy as np
 from tqdm import tqdm
+sys.path.append('.')
+sys.path.append('..')
+from set import *
+from utils import *
+
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -30,7 +35,6 @@ parser.add_argument('--model_path', default='checkpoint/', type=str,
 parser.add_argument('--model_dir', default='checkpoint/', type=str, 
                     help='model save path')
 
-
 parser.add_argument('--dataset', default='CIFAR10',  
                     help='[CIFAR10, CIFAR100, tinyImagenet]')
 parser.add_argument('--gpu', default='0', type=str,
@@ -41,10 +45,10 @@ parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='batch norm momentum for advprop')
 parser.add_argument('--alpha', default=1.0, type=float, help='weight for contrastive loss with adversarial example')
 parser.add_argument('--debug', default=False, action='store_true', help='debug mode')
-
+parser.add_argument('--seed', default=1, type=int, help='seed')
 
 args = parser.parse_args() 
-
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 
@@ -124,7 +128,7 @@ def test(args, trainloader, testloader, net, ndata):
 def main():
     args.device = device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    root = "../datasets"
+    root = "../../data"
     transform = transforms.Compose([
         torchvision.transforms.Resize(size=32),
         transforms.ToTensor(),
@@ -174,8 +178,8 @@ def main():
         suffix = suffix + '_alpha_{}_adv_eps_{}'.format(args.alpha, args.eps)
  
     suffix = suffix + '_proj_dim_{}'.format(args.projection_dim)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
-    
+    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
+    wandb.init(config=args, name='KNN' + suffix.replace("_log/", ''))
     args.model_dir = args.model_dir + args.dataset + '/'
     if args.adv:
         simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_100.pt', bn_adv_flag = True, bn_adv_momentum = args.bn_adv_momentum)

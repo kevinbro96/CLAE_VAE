@@ -37,7 +37,6 @@ class SimCLR_BN(nn.Module):
                 nn.Linear(self.n_features, args.projection_dim),
             )
 
-
     def get_resnet(self, name):
         resnets = {
             "resnet18": resnet18(pool_len=4, bn_adv_flag=self.bn_adv_flag, bn_adv_momentum=self.bn_adv_momentum),
@@ -49,7 +48,7 @@ class SimCLR_BN(nn.Module):
         if name not in resnets.keys():
             raise KeyError(f"{name} is not a valid ResNet version")
         return resnets[name]
-     
+
     def get_imagenet_resnet(self, name):
         resnets = {
             "resnet18": resnet18_imagenet(bn_adv_flag=self.bn_adv_flag, bn_adv_momentum=self.bn_adv_momentum),
@@ -61,8 +60,6 @@ class SimCLR_BN(nn.Module):
         if name not in resnets.keys():
             raise KeyError(f"{name} is not a valid ResNet version")
         return resnets[name]
-
-
 
     def forward(self, x, adv=False):
         h = self.encoder(x, adv=adv)

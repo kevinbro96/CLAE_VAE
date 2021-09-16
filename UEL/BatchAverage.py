@@ -5,6 +5,7 @@ import math
 import numpy as np
 import pdb
 
+
 def gen_mask(k, feat_dim):
     mask = None
     for i in range(k):
@@ -14,9 +15,11 @@ def gen_mask(k, feat_dim):
         mask = tmp_mask if mask is None else torch.cat([mask,tmp_mask],2)
     return mask
 
+
 def entropy(prob):
     # assume m x m x k input
     return -torch.sum(prob*torch.log(prob),1)
+
 
 class BatchCriterion(nn.Module):
     ''' Compute the loss within each batch  

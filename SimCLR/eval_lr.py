@@ -4,9 +4,15 @@ import torchvision.transforms as transforms
 import argparse
 import os
 from model import load_model, save_model
-
+import sys
+import wandb
 from modules import LogisticRegression
 from load_imagenet import imagenet, load_data
+sys.path.append('.')
+sys.path.append('..')
+from set import *
+from utils import *
+
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -27,7 +33,6 @@ parser.add_argument('--model_path', default='checkpoint/', type=str,
 parser.add_argument('--model_dir', default='checkpoint/', type=str, 
                     help='model save path')
 
-
 parser.add_argument('--dataset', default='CIFAR10',  
                     help='[CIFAR10, CIFAR100, tinyImagenet]')
 parser.add_argument('--gpu', default='0', type=str,
@@ -38,10 +43,10 @@ parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='batch norm momentum for advprop')
 parser.add_argument('--alpha', default=1.0, type=float, help='weight for contrastive loss with adversarial example')
 parser.add_argument('--debug', default=False, action='store_true', help='debug mode')
-
+parser.add_argument('--seed', default=1, type=int, help='seed')
 
 args = parser.parse_args() 
-
+set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 
@@ -79,6 +84,7 @@ def train(args, loader, simclr_model, model, criterion, optimizer):
         
     return loss_epoch, accuracy_epoch
 
+
 def test(args, loader, simclr_model, model, criterion, optimizer):
     loss_epoch = 0
     accuracy_epoch = 0
@@ -107,10 +113,11 @@ def test(args, loader, simclr_model, model, criterion, optimizer):
 
     return loss_epoch, accuracy_epoch
 
+
 def main():
     args.device = device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-    root = "../datasets"
+    root = "../../data"
 
     if args.dataset == 'tinyImagenet':
         transform = transforms.Compose([
@@ -176,8 +183,8 @@ def main():
         suffix = suffix + '_alpha_{}_adv_eps_{}'.format(args.alpha, args.eps)
  
     suffix = suffix + '_proj_dim_{}'.format(args.projection_dim)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
-    
+    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
+    wandb.init(config=args, name='LR/' + suffix.replace("_log/", ''))
     args.model_dir = args.model_dir + args.dataset + '/'
     print("Loading {}".format(args.model_dir + suffix + '_epoch_100.pt'))
     if args.adv:
@@ -211,7 +218,8 @@ def main():
         loss_epoch, accuracy_epoch = train(args, train_loader, simclr_model, model, criterion, optimizer)
         print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)), file = test_log_file)
         test_log_file.flush()
-        
+        wandb.log({'Train/Loss': loss_epoch / len(train_loader),
+                   'Train/ACC': accuracy_epoch / len(train_loader)})
 
         # final testing
         test_loss_epoch, test_accuracy_epoch = test(args, test_loader, simclr_model, model, criterion, optimizer)
@@ -219,6 +227,9 @@ def main():
         if test_current_acc > best_acc:
             best_acc = test_current_acc
         print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc), file = test_log_file)
+        wandb.log({'Test/Loss': test_loss_epoch / len(test_loader),
+                   'Test/ACC': test_current_acc,
+                   'Test/BestACC': best_acc})
         test_log_file.flush()
         
         if args.debug:
