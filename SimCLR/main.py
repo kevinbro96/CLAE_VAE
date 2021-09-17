@@ -71,11 +71,12 @@ def gen_adv(model, vae, x_i, criterion):
 
     with torch.no_grad():
         sign_grad = variable_bottle.grad.data.sign()
-        variable_bottle = variable_bottle + args.eps * sign_grad
+        variable_bottle.data = variable_bottle.data + args.eps * sign_grad
         adv_gx = vae(variable_bottle, True)
         x_j_adv = adv_gx + (x_i - gx).detach()
-
-    return x_j_adv.detach(), gx
+    x_j_adv.requires_grad = False
+    x_j_adv.detach()
+    return x_j_adv, gx
 
 
 def train(args, epoch, train_loader, model, vae, criterion, optimizer):
@@ -95,12 +96,12 @@ def train(args, epoch, train_loader, model, vae, criterion, optimizer):
         optimizer.zero_grad()
         h_j, z_j = model(x_j)
         loss_og = criterion(z_i, z_j)
-        loss = loss_og
         if args.adv:
             _, z_j_adv = model(x_j_adv, adv=True)
             loss_adv = criterion(z_i, z_j_adv)
-            loss += args.alpha * loss_adv
+            loss = loss_og + args.alpha * loss_adv
         else:
+            loss = loss_og
             loss_adv = loss_og
 
         loss.backward()
@@ -108,7 +109,7 @@ def train(args, epoch, train_loader, model, vae, criterion, optimizer):
         optimizer.step()
 
         if step % 50 == 0:
-            print(f"[Epoch]: {epoch} [{step}/{len(train_loader)}]\t Loss: {loss.item()}")
+            print(f"[Epoch]: {epoch} [{step}/{len(train_loader)}]\t Loss: {loss.item():.3f} Loss_og: {loss_og.item():.3f} Loss_adv: {loss_adv.item():.3f}")
 
         loss_epoch += loss.item()
         args.global_step += 1

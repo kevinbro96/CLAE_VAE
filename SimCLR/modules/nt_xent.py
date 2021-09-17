@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-
+import pdb
 
 def gen_mask(k, feat_dim):
     mask = None
@@ -11,9 +11,11 @@ def gen_mask(k, feat_dim):
         mask = tmp_mask if mask is None else torch.cat([mask,tmp_mask],2)
     return mask
 
+
 def entropy(prob):
     # assume m x m x k input
     return -torch.sum(prob*torch.log(prob),1)
+
 
 class NT_Xent(nn.Module):
 
@@ -32,8 +34,7 @@ class NT_Xent(nn.Module):
         We do not sample negative examples explicitly.
         Instead, given a positive pair, similar to (Chen et al., 2017), we treat the other 2(N − 1) augmented examples within a minibatch as negative examples.
         """
-
-        
+        pdb.set_trace()
         p1 = torch.cat((z_i, z_j), dim=0)
         sim = self.similarity_f(p1.unsqueeze(1), p1.unsqueeze(0)) / self.temperature
          

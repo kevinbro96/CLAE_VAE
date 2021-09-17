@@ -13,7 +13,7 @@ from modules.transformations import TransformsSimCLR
 from modules.transformations import TransformsSimCLR_imagenet
 from utils import mask_correlated_samples
 from load_imagenet import imagenet, load_data
-
+import pdb
 sys.path.append('.')
 sys.path.append('..')
 from set import *
@@ -23,7 +23,7 @@ parser = argparse.ArgumentParser(description='PyTorch Seen Testing  Training')
 parser.add_argument('--batch_size', default=256, type=int,
                     metavar='B', help='training batch size')
 parser.add_argument('--workers', default=4, type=int, help='workers')
-parser.add_argument('--epochs', default=100, type=int, help='epochs')
+parser.add_argument('--epochs', default=300, type=int, help='epochs')
 parser.add_argument('--resnet', default="resnet18", type=str, help="resnet")
 parser.add_argument('--normalize', default=True, action='store_true', help='normalize')
 parser.add_argument('--projection_dim', default=64, type=int, help='projection_dim')
@@ -79,16 +79,15 @@ def train(args, epoch, train_loader, model, criterion, optimizer):
         h_i, z_i = model(x_i)
         if args.adv:
             x_j_adv = gen_adv(model, x_i, criterion)
-
         optimizer.zero_grad()
         h_j, z_j = model(x_j)
         loss_og = criterion(z_i, z_j)
-        loss = loss_og
         if args.adv:
             _, z_j_adv = model(x_j_adv, adv=True)
             loss_adv = criterion(z_i, z_j_adv)
-            loss += args.alpha * loss_adv
+            loss = loss_og + args.alpha * loss_adv
         else:
+            loss = loss_og
             loss_adv = loss_og
 
         loss.backward()
@@ -96,7 +95,7 @@ def train(args, epoch, train_loader, model, criterion, optimizer):
         optimizer.step()
 
         if step % 50 == 0:
-            print(f"[Epoch]: {epoch} [{step}/{len(train_loader)}]\t Loss: {loss.item()}")
+            print(f"[Epoch]: {epoch} [{step}/{len(train_loader)}]\t Loss: {loss.item():.3f} Loss_og: {loss_og.item():.3f} Loss_adv: {loss_adv.item():.3f}")
 
         loss_epoch += loss.item()
         args.global_step += 1
