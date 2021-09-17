@@ -2,7 +2,7 @@ import os
 import torch
 import torchvision
 import argparse
-#import sys
+import sys
 from torch.autograd import Variable
 import numpy as np
 import wandb
@@ -13,17 +13,16 @@ from modules.transformations import TransformsSimCLR
 from modules.transformations import TransformsSimCLR_imagenet
 from utils import mask_correlated_samples
 from load_imagenet import imagenet, load_data
-#
-# sys.path.append('.')
-# sys.path.append('..')
-# from set import *
-# from vae import *
-# from eval_knn import kNN
+from eval_knn import kNN
+sys.path.append('..')
+from set import *
+from vae import *
+
 
 parser = argparse.ArgumentParser(description=' Seen Testing Category Training')
 parser.add_argument('--batch_size', default=256, type=int,
                     metavar='B', help='training batch size')
-parser.add_argument('--mdim', default=512, type=int, help='CNN_embed_dim')
+parser.add_argument('--dim', default=512, type=int, help='CNN_embed_dim')
 parser.add_argument('--workers', default=4, type=int, help='workers')
 parser.add_argument('--epochs', default=300, type=int, help='epochs')
 parser.add_argument('--resnet', default="resnet18", type=str, help="resnet")
