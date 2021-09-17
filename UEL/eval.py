@@ -57,6 +57,7 @@ parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
 parser.add_argument('--seed', default=1, type=int, help='seed')
+parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
 args = parser.parse_args() 
 set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
