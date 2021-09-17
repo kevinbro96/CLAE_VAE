@@ -45,7 +45,6 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 parser.add_argument('--logistic_epochs', default=1000, type=int, metavar='B', help='training batch size')
 parser.add_argument('--logistic_batch_size', default=128, type=int, metavar='B', help='training batch size')
-parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
 
 parser.add_argument('--dataset', default='cifar10',  help='cifar10, cifar100')
 parser.add_argument('--trial', type=int, help='trial')
