@@ -17,9 +17,10 @@ def load_model(args, loader, reload_model=False, load_path = None, bn_adv_flag=F
         
     model = model.to(args.device)
 
-    scheduler = None
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)  # TODO: LARS
-
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, args.epochs, eta_min=0, last_epoch=-1
+        )
     return model, optimizer, scheduler
 
 

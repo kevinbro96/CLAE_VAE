@@ -86,14 +86,30 @@ def main(args):
     setup_logger(args.save_dir)
     use_cuda = torch.cuda.is_available()
     print('\n[Phase 1] : Data Preparation')
-    transform_train = transforms.Compose([
-        transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
-        transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-        transforms.RandomGrayscale(p=0.2),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
-    ])
+    if args.simclr:
+        s = 1
+        color_jitter = transforms.ColorJitter(
+            0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
+        )
+        transform_train = transforms.Compose(
+            [
+                transforms.RandomResizedCrop(size=32),
+                transforms.RandomHorizontalFlip(),  # with 0.5 probability
+                transforms.RandomApply([color_jitter], p=0.8),
+                transforms.RandomGrayscale(p=0.2),
+                transforms.ToTensor(),
+                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            ]
+        )
+    else:
+        transform_train = transforms.Compose([
+            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+            transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
     if (args.dataset == 'cifar10'):
         print("| Preparing CIFAR-10 dataset...")
         sys.stdout.write("| ")
@@ -177,6 +193,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='batch_size')
     parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
     parser.add_argument('--kl', default=0.1, type=float, help='kl weight')
+    parser.add_argument('--simclr', default=False, type=str, help='simclr')
     args = parser.parse_args()
     wandb.init(config=args, name=args.save_dir.replace("./results/", ''))
     set_random_seed(args.seed)
