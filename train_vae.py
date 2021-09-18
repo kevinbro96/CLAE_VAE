@@ -135,7 +135,7 @@ def main(args):
         trainset, _ = load_data('../data/tiny_imagenet.pickle')
         trainset = imagenet(trainset, transform=transform_train)
 
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=16, drop_last=True)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
 
     # Model
     print('\n[Phase 2] : Model setup')

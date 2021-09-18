@@ -286,6 +286,7 @@ def train(epoch):
             break
         args.global_step += 1
 
+
 args.global_step = 0
 best_acc = 0
 for epoch in range(start_epoch, start_epoch + 301):
