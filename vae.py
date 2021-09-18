@@ -2,7 +2,7 @@ from __future__ import print_function
 import abc
 import os
 import math
-
+import pdb
 import numpy as np
 import logging
 import torch
@@ -94,6 +94,93 @@ class CVAE_cifar_withbn(AbstractAutoEncoder):
         )
         self.bn = nn.BatchNorm2d(3)
         self.f = 8
+        self.d = d
+        self.z = z
+        self.fc11 = nn.Linear(d * self.f ** 2, self.z)
+        self.fc12 = nn.Linear(d * self.f ** 2, self.z)
+        self.fc21 = nn.Linear(self.z, d * self.f ** 2)
+
+    def encode(self, x):
+        h = self.encoder(x)
+        h1 = h.view(-1, self.d * self.f ** 2)
+        return h, self.fc11(h1), self.fc12(h1)
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(0.5).exp_()
+            eps = std.new(std.size()).normal_()
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def decode(self, z):
+        z = z.view(-1, self.d, self.f, self.f)
+        h3 = self.decoder(z)
+        return torch.tanh(h3)
+
+    def forward(self, x, decode=False):
+        if decode:
+            z_projected = self.fc21(x)
+            gx = self.decode(z_projected)
+            gx = self.bn(gx)
+            return gx
+        else:
+            _, mu, logvar = self.encode(x)
+            z = self.reparameterize(mu, logvar)
+            z_projected = self.fc21(z)
+            gx = self.decode(z_projected)
+            gx = self.bn(gx)
+        return z, gx, mu, logvar
+
+
+class CVAE_imagenet_withbn(AbstractAutoEncoder):
+    def __init__(self, d, z,  **kwargs):
+        super(CVAE_imagenet_withbn, self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, d // 16, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 16),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(d // 16, d // 8, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(d // 8, d // 4, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 4),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(d // 4, d // 2, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(d // 2, d, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d),
+            nn.ReLU(inplace=True),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d)
+        )
+
+        self.decoder = nn.Sequential(
+            nn.BatchNorm2d(d),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            nn.ConvTranspose2d(d, d // 2, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 2),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d // 2, d // 4, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 4),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d // 4, d // 8, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 8),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d // 8, d // 16, kernel_size=4, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(d // 16),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d // 16, 3, kernel_size=4, stride=2, padding=1, bias=False),
+        )
+        self.bn = nn.BatchNorm2d(3)
+        self.f = 7
         self.d = d
         self.z = z
         self.fc11 = nn.Linear(d * self.f ** 2, self.z)

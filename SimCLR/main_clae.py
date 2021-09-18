@@ -133,6 +133,13 @@ def main():
             root, download=True, transform=TransformsSimCLR()
         )
         data = 'non_imagenet'
+        transform_test = transforms.Compose([
+            transforms.Resize(size=32),
+            transforms.ToTensor(),
+            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+        ])
+        testset = torchvision.datasets.CIFAR100(root='../../data', train=False, download=True, transform=transform_test)
+
     elif args.dataset == "tinyImagenet":
         root = '../datasets/tiny_imagenet.pickle'
         train_dataset, _ = load_data(root)

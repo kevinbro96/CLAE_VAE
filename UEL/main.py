@@ -250,7 +250,7 @@ def train(epoch):
         inputs1, inputs2, indexes = inputs1.to(device), inputs2.to(device), indexes.to(device)
         
         if args.adv:
-            inputs_adv, _ = gen_adv(net, vae, inputs1, criterion, indexes)
+            inputs_adv, gx = gen_adv(net, vae, inputs1, criterion, indexes)
         
         optimizer.zero_grad()
         inputs1_feat = net(inputs1)

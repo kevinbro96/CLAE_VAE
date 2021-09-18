@@ -23,6 +23,7 @@ sys.path.append('.')
 
 from vae import *
 from set import *
+from load_imagenet import imagenet, load_data
 
 
 def reconst_images(batch_size=64, batch_num=1, dataloader=None, model=None):
@@ -86,6 +87,16 @@ def main(args):
     setup_logger(args.save_dir)
     use_cuda = torch.cuda.is_available()
     print('\n[Phase 1] : Data Preparation')
+
+    if args.dataset == 'tinyimagenet':
+        size = 224
+        normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        model = CVAE_imagenet_withbn(128, args.dim)
+    else:
+        size = 32
+        normalizer = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        model = CVAE_cifar_withbn(128, args.dim)
+
     if args.simclr:
         s = 1
         color_jitter = transforms.ColorJitter(
@@ -93,34 +104,41 @@ def main(args):
         )
         transform_train = transforms.Compose(
             [
-                transforms.RandomResizedCrop(size=32),
-                transforms.RandomHorizontalFlip(),  # with 0.5 probability
-                transforms.RandomApply([color_jitter], p=0.8),
-                transforms.RandomGrayscale(p=0.2),
-                transforms.ToTensor(),
-                transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            transforms.RandomResizedCrop(size=size),
+            transforms.RandomHorizontalFlip(),  # with 0.5 probability
+            transforms.RandomApply([color_jitter], p=0.8),
+            transforms.RandomGrayscale(p=0.2),
+            transforms.ToTensor(),
+            normalizer
             ]
         )
     else:
         transform_train = transforms.Compose([
-            transforms.RandomResizedCrop(size=32, scale=(0.2, 1.)),
+            transforms.RandomResizedCrop(size=size, scale=(0.2, 1.)),
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
             transforms.RandomGrayscale(p=0.2),
             transforms.RandomHorizontalFlip(),
             transforms.ToTensor(),
-            transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
+            normalizer
         ])
-    if (args.dataset == 'cifar10'):
+    if args.dataset == 'cifar10':
         print("| Preparing CIFAR-10 dataset...")
         sys.stdout.write("| ")
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=True, transform=transform_train)
+    elif args.dataset == 'cifar100':
+        print("| Preparing CIFAR-100 dataset...")
+        sys.stdout.write("| ")
+        trainset = torchvision.datasets.CIFAR100(root='../data', train=True, download=True, transform=transform_train)
+    elif args.dataset == 'tinyimagenet':
+        print("| Preparing Tiny-Imagenet dataset...")
+        sys.stdout.write("| ")
+        trainset, _ = load_data('../data/tiny_imagenet.pickle')
+        trainset = imagenet(trainset, transform=transform_train)
 
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=0, drop_last=True)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=16, drop_last=True)
 
     # Model
     print('\n[Phase 2] : Model setup')
-    model = CVAE_cifar_withbn(128, args.dim)
-
     if use_cuda:
         model.cuda()
         model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
@@ -147,7 +165,6 @@ def main(args):
 
         print('\n=> Training Epoch #%d, LR=%.4f' % (epoch, optimizer.param_groups[0]['lr']))
         for batch_idx, (x, y) in enumerate(trainloader):
-
             x, y = x.cuda(), y.cuda().view(-1, )
             x, y = Variable(x), Variable(y)
             bs = x.size(0)
