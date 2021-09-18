@@ -12,7 +12,7 @@ sys.path.append('.')
 sys.path.append('..')
 from set import *
 from utils import *
-
+import pdb
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -21,7 +21,7 @@ parser.add_argument('--logistic_batch_size', default=256, type=int,
                     metavar='B', help='logistic_batch_size batch size')
 parser.add_argument('--logistic_epochs', default=1000, type=int, help='logistic_epochs')
 parser.add_argument('--workers', default=4, type=int, help='workers')
-parser.add_argument('--epochs', default=100, type=int,help='epochs')
+parser.add_argument('--epochs', default=300, type=int,help='epochs')
 parser.add_argument('--resnet', default="resnet18", type=str, help="resnet")
 parser.add_argument('--normalize', default=True, action='store_true', help='normalize')
 parser.add_argument('--projection_dim', default=64, type=int,help='projection_dim')
@@ -132,7 +132,8 @@ def main():
         transform = transforms.Compose([
         torchvision.transforms.Resize(size=32),
         transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+        transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        ])
         data = 'non_imagenet'
 
     if args.dataset == "CIFAR10" :
@@ -186,11 +187,11 @@ def main():
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
     wandb.init(config=args, name='LR/' + suffix.replace("_log/", ''))
     args.model_dir = args.model_dir + args.dataset + '/'
-    print("Loading {}".format(args.model_dir + suffix + '_epoch_100.pt'))
+    print("Loading {}".format(args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs)))
     if args.adv:
-        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_100.pt', bn_adv_flag = True, bn_adv_momentum = args.bn_adv_momentum, data=data)
+        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs), bn_adv_flag = True, bn_adv_momentum = args.bn_adv_momentum, data=data)
     else:
-        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_100.pt', bn_adv_flag = False, bn_adv_momentum = args.bn_adv_momentum, data=data)
+        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs), bn_adv_flag = False, bn_adv_momentum = args.bn_adv_momentum, data=data)
  
 
     test_log_file = open(log_dir + suffix + '.txt', "w") 
