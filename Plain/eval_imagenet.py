@@ -86,7 +86,7 @@ if not os.path.isdir(args.model_dir + '/' + dataset + '_eval'):
     os.makedirs(args.model_dir + '/' + dataset + '_eval')
 
 suffix = args.dataset + '_{}_batch_{}_embed_{}'.format(args.resnet, args.batch_size, args.low_dim)
-
+suffix = suffix + 'dim{}'.format(args.dim)
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)

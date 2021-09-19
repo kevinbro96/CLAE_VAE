@@ -18,7 +18,7 @@ import numpy as np
 import models
 import datasets
 import math
-
+import wandb
 from utils import *
 
 from load_imagenet import imagenetEval, load_data
@@ -94,7 +94,7 @@ if args.adv:
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
 else:
     suffix = suffix + '_seed_{}'.format(args.seed)
-
+wandb.init(config=args, name='LR'+suffix.replace("_log/", ''))
    
 print(suffix)
 # log the output
@@ -228,6 +228,8 @@ for epoch in range(args.logistic_epochs):
     loss_epoch, accuracy_epoch = train(train_loader, net, model, criterion, optimizer)
     print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)), file = test_log_file)
     print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)))
+    wandb.log({'Train/Loss': loss_epoch / len(train_loader),
+               'Train/ACC': accuracy_epoch / len(train_loader)})
     test_log_file.flush()
     # final testing
     test_loss_epoch, test_accuracy_epoch = test(test_loader, net, model, criterion, optimizer)
@@ -240,7 +242,9 @@ for epoch in range(args.logistic_epochs):
     print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc), file = test_log_file)
     print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc))
     test_log_file.flush()
-    
+    wandb.log({'Test/Loss': test_loss_epoch / len(test_loader),
+               'Test/ACC': test_current_acc,
+              'Test/BestACC': best_acc})
     if args.debug:
         break
 
