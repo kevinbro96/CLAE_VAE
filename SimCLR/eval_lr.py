@@ -151,7 +151,7 @@ def main():
             root, train=False, download=True, transform=transform
         )
     elif args.dataset == "tinyImagenet":
-        root = '../datasets/tiny_imagenet.pickle'
+        root = '../../data/tiny_imagenet.pickle'
         train_dataset, test_dataset = load_data(root)
         train_dataset = imagenet(train_dataset, transform=transform)
         test_dataset = imagenet(test_dataset, transform=transform)

@@ -142,7 +142,7 @@ def main():
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
         testset = torchvision.datasets.CIFAR10(root='../../data', train=False, download=True, transform=transform_test)
-
+        vae = CVAE_cifar_withbn(128, args.dim)
     elif args.dataset == "CIFAR100":
         root = "../../data"
         train_dataset = torchvision.datasets.CIFAR100(
@@ -155,11 +155,13 @@ def main():
             transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)),
         ])
         testset = torchvision.datasets.CIFAR100(root='../../data', train=False, download=True, transform=transform_test)
+        vae = CVAE_cifar_withbn(128, args.dim)
     elif args.dataset == "tinyImagenet":
-        root = '../datasets/tiny_imagenet.pickle'
-        train_dataset, _ = load_data(root)
+        root = '../../data/tiny_imagenet.pickle'
+        train_dataset, testset = load_data(root)
         train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet(size=224))
         data = 'imagenet'
+        vae = CVAE_imagenet_withbn(128, args.dim)
     else:
         raise NotImplementedError
 
@@ -187,7 +189,7 @@ def main():
     else:
         model, optimizer, scheduler = load_model(args, train_loader, bn_adv_flag=False,
                                                  bn_adv_momentum=args.bn_adv_momentum, data=data)
-    vae = CVAE_cifar_withbn(128, args.dim)
+
     vae.load_state_dict(torch.load(args.vae_path))
     vae.to(args.device)
     vae.eval()
@@ -218,8 +220,7 @@ def main():
         print('epoch: {}% \t (loss: {}%)'.format(epoch, loss_epoch / len(train_loader)), file=test_log_file)
         print('----------Evaluation---------')
         start = time.time()
-        if args.dataset == 'CIFAR10' or args.dataset == 'CIFAR100':
-            acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
+        acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
         print("Evaluation Time: '{}'s".format(time.time() - start))
 
         if acc >= best_acc:
