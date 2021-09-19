@@ -43,10 +43,7 @@ parser.add_argument('--batch-size', default=128, type=int,
 parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
-
-
 parser.add_argument('--dataset', default='tinyImagenet',  help='[tinyImagenet]')
-parser.add_argument('--trial', type=int, help='trial')
 parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
 parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial')
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
@@ -55,7 +52,13 @@ parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regul
 parser.add_argument('--logistic_epochs', default=200, type=int, metavar='B', help='training batch size')
 parser.add_argument('--logistic_batch_size', default=128, type=int, metavar='B', help='training batch size')
 parser.add_argument('--debug', default=False, action='store_true', help='test_both_adv')
-args = parser.parse_args() 
+parser.add_argument('--vae_path',
+                    default='../results/autoaug_new_8_0.5/model_epoch132.pth',
+                    type=str, help='vae_path')
+parser.add_argument('--seed', default=1, type=int, help='seed')
+parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
+
+args = parser.parse_args()
 
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
@@ -82,13 +85,13 @@ if not os.path.isdir(args.model_dir):
 if not os.path.isdir(args.model_dir + '/' + dataset + '_eval'):
     os.makedirs(args.model_dir + '/' + dataset + '_eval')
 
-suffix = args.dataset + '_{}_batch_{}_embed_dim_{}'.format(args.resnet, args.batch_size, args.low_dim)
+suffix = args.dataset + '_{}_batch_{}_embed_{}'.format(args.resnet, args.batch_size, args.low_dim)
 
 if args.adv:
     suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_trial_{}'.format(args.bn_adv_momentum, args.trial)
+    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
 else:
-    suffix = suffix + '_trial_{}'.format(args.trial)
+    suffix = suffix + '_seed_{}'.format(args.seed)
 
    
 print(suffix)
@@ -110,7 +113,7 @@ transform = transforms.Compose([
 ])
 
 if args.dataset == "tinyImagenet":
-    root = '../datasets/tiny_imagenet.pickle'
+    root = '../../data/tiny_imagenet.pickle'
 else:
     raise NotImplementedError
 
