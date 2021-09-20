@@ -1,4 +1,4 @@
-
+import os
 import torch
 import torchvision
 import argparse
@@ -16,6 +16,7 @@ from load_imagenet import imagenet, load_data
 from eval_knn import kNN
 sys.path.append('..')
 from set import *
+from vae import *
 
 
 parser = argparse.ArgumentParser(description=' Seen Testing Category Training')
