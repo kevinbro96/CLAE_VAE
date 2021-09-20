@@ -23,7 +23,7 @@ sys.path.append('.')
 
 from vae import *
 from set import *
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, ImageNet100
 
 
 def reconst_images(batch_size=64, batch_num=1, dataloader=None, model=None):
@@ -88,7 +88,7 @@ def main(args):
     use_cuda = torch.cuda.is_available()
     print('\n[Phase 1] : Data Preparation')
 
-    if args.dataset == 'tinyimagenet':
+    if args.dataset == 'tinyimagenet' or args.dataset == 'imagenet100' :
         size = 224
         normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         model = CVAE_imagenet_withbn(128, args.dim)
@@ -125,17 +125,23 @@ def main(args):
         print("| Preparing CIFAR-10 dataset...")
         sys.stdout.write("| ")
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=True, transform=transform_train)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     elif args.dataset == 'cifar100':
         print("| Preparing CIFAR-100 dataset...")
         sys.stdout.write("| ")
         trainset = torchvision.datasets.CIFAR100(root='../data', train=True, download=True, transform=transform_train)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     elif args.dataset == 'tinyimagenet':
         print("| Preparing Tiny-Imagenet dataset...")
         sys.stdout.write("| ")
         trainset, _ = load_data('../data/tiny_imagenet.pickle')
         trainset = imagenet(trainset, transform=transform_train)
-
-    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
+    elif args.dataset == 'imagenet100':
+        print("| Preparing imagenet100 dataset...")
+        sys.stdout.write("| ")
+        dataset = ImageNet100(data_path='/gpub/imagenet_raw', transform_train=transform_train)
+        trainloader, _ = dataset.make_loaders(workers=4, batch_size=args.batch_size)
 
     # Model
     print('\n[Phase 2] : Model setup')

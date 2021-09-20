@@ -2,6 +2,17 @@ import pickle
 from PIL import Image
 import torch
 import pdb
+from robustness.datasets import CIFAR, DATASETS, DataSet, CustomImageNet
+
+
+class ImageNet100(CustomImageNet):
+    def __init__(self, data_path, **kwargs):
+
+        super().__init__(
+            data_path=data_path,
+            custom_grouping=[[label] for label in range(0, 1000, 10)],
+            **kwargs,
+        )
 
 
 class imagenetEval:
