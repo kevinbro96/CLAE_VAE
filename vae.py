@@ -227,10 +227,13 @@ class VQVAE_imagenet(nn.Module):
         super(VQVAE_imagenet, self).__init__()
 
         self.encoder = nn.Sequential(
-            nn.Conv2d(num_channels, d//2, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(num_channels, d//4, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(d//4),
+            nn.LeakyReLU(inplace=True),
+            nn.Conv2d(d//4, d//2, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(d//2),
             nn.LeakyReLU(inplace=True),
-            nn.Conv2d(d//2, d, kernel_size=4, stride=2, padding=1),
+            nn.Conv2d(d // 2, d, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(d),
             nn.LeakyReLU(inplace=True),
             nn.Conv2d(d, d, kernel_size=4, stride=2, padding=1),
@@ -251,7 +254,10 @@ class VQVAE_imagenet(nn.Module):
             nn.ConvTranspose2d(d, d//2, kernel_size=4, stride=2, padding=1),
             nn.BatchNorm2d(d//2),
             nn.LeakyReLU(inplace=True),
-            nn.ConvTranspose2d(d//2, num_channels, kernel_size=4, stride=2, padding=1),
+            nn.ConvTranspose2d(d//2, d // 4, kernel_size=4, stride=2, padding=1),
+            nn.BatchNorm2d(d // 4),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d//4, num_channels, kernel_size=4, stride=2, padding=1),
         )
         self.d = d
         self.emb = NearestEmbed(k, d)
