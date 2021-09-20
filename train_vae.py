@@ -92,12 +92,15 @@ def main(args):
         size = 224
         normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         model = CVAE_imagenet_withbn(128, args.dim)
+        p_blur = 0.5
     else:
         size = 32
         normalizer = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         model = CVAE_cifar_withbn(128, args.dim)
+        p_blur = 0.0
 
-    if args.simclr:
+    if args.mode=='simclr':
+        print('\nData Augmentation: SimCLR')
         s = 1
         color_jitter = transforms.ColorJitter(
             0.8 * s, 0.8 * s, 0.8 * s, 0.2 * s
@@ -112,7 +115,19 @@ def main(args):
             normalizer
             ]
         )
+    elif args.mode=='simsiam':
+        print('\nData Augmentation: SimSiam')
+        transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(size, scale=(0.2, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomApply([transforms.GaussianBlur(kernel_size=size // 20 * 2 + 1, sigma=(0.1, 2.0))], p=p_blur),
+        transforms.ToTensor(),
+        normalizer
+        ])
     else:
+        print('\nData Augmentation: Normal')
         transform_train = transforms.Compose([
             transforms.RandomResizedCrop(size=size, scale=(0.2, 1.)),
             transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
@@ -216,7 +231,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=128, type=int, help='batch_size')
     parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
     parser.add_argument('--kl', default=0.1, type=float, help='kl weight')
-    parser.add_argument('--simclr', default=False, type=str, help='simclr')
+    parser.add_argument('--mode', default='normal', type=str, help='simclr')
     args = parser.parse_args()
     wandb.init(config=args, name=args.save_dir.replace("./results/", ''))
     set_random_seed(args.seed)
