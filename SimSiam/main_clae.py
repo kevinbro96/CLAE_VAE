@@ -98,7 +98,7 @@ def main():
     elif args.dataset == "tinyImagenet":
         root = '../../data/tiny_imagenet.pickle'
         train_dataset, testset = load_data(root)
-        train_dataset = imagenet(train_dataset, transform=TransformsSimSiam_imagenet(size=224))
+        train_dataset = imagenet(train_dataset, transform=TransformsSimSiam_imagenet())
         data = 'imagenet'
     else:
         raise NotImplementedError
