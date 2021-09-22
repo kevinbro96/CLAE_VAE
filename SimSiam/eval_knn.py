@@ -11,6 +11,7 @@ from modules import LogisticRegression
 import numpy as np
 from tqdm import tqdm
 import torch.nn.functional as F
+import pdb
 
 
 def kNN(epoch, net, trainloader, testloader, K, sigma, ndata, low_dim = 128):
@@ -19,14 +20,14 @@ def kNN(epoch, net, trainloader, testloader, K, sigma, ndata, low_dim = 128):
     correct_t = 0
     testsize = testloader.dataset.__len__()
 
-   
-    if hasattr(trainloader.dataset, 'imgs'):
-        trainLabels = torch.LongTensor([y for (p, y) in trainloader.dataset.imgs]).cuda()
-    else:
-        try:
-            trainLabels = torch.LongTensor(trainloader.dataset.targets).cuda()
-        except:
-            trainLabels = torch.LongTensor(trainloader.dataset.labels).cuda()
+    #pdb.set_trace()
+    # if hasattr(trainloader.dataset, 'imgs'):
+    #     trainLabels = torch.LongTensor([y for (p, y) in trainloader.dataset]).cuda()
+    # else:
+    try:
+        trainLabels = torch.LongTensor(trainloader.dataset.targets).cuda()
+    except:
+        trainLabels = torch.LongTensor(trainloader.dataset.labels).cuda()
     trainFeatures = np.zeros((low_dim, ndata))
     trainFeatures = torch.Tensor(trainFeatures).cuda() 
     C = trainLabels.max() + 1
