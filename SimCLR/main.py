@@ -17,6 +17,7 @@ from eval_knn import kNN
 sys.path.append('..')
 from set import *
 from vae import *
+from apex import amp
 
 
 parser = argparse.ArgumentParser(description=' Seen Testing Category Training')
@@ -50,14 +51,18 @@ parser.add_argument('--vae_path',
                     default='../results/vae_dim512_kl0.1_simclr/model_epoch92.pth',
                     type=str, help='vae_path')
 parser.add_argument('--seed', default=1, type=int, help='seed')
-
+parser.add_argument("--amp", action="store_true",
+                    help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+parser.add_argument("--opt_level", type=str, default="O1",
+                    help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                         "See details at https://nvidia.github.io/apex/amp.html")
 args = parser.parse_args()
 print(args)
 set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 
-def gen_adv(model, vae, x_i, criterion):
+def gen_adv(model, vae, x_i, criterion, optimizer):
     x_i = x_i.detach()
     h_i, z_i = model(x_i, adv=True)
 
@@ -68,7 +73,11 @@ def gen_adv(model, vae, x_i, criterion):
     x_j_adv = adv_gx + (x_i - gx).detach()
     h_j_adv, z_j_adv = model(x_j_adv, adv=True)
     tmp_loss = criterion(z_i, z_j_adv)
-    tmp_loss.backward()
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
 
     with torch.no_grad():
         sign_grad = variable_bottle.grad.data.sign()
@@ -92,7 +101,7 @@ def train(args, epoch, train_loader, model, vae, criterion, optimizer):
         # positive pair, with encoding
         h_i, z_i = model(x_i)
         if args.adv:
-            x_j_adv, gx = gen_adv(model, vae,  x_i, criterion)
+            x_j_adv, gx = gen_adv(model, vae,  x_i, criterion, optimizer)
 
         optimizer.zero_grad()
         h_j, z_j = model(x_j)
@@ -104,8 +113,11 @@ def train(args, epoch, train_loader, model, vae, criterion, optimizer):
         else:
             loss = loss_og
             loss_adv = loss_og
-
-        loss.backward()
+        if args.amp:
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
 
         optimizer.step()
 
@@ -203,8 +215,10 @@ def main():
     vae.load_state_dict(torch.load(args.vae_path))
     vae.to(args.device)
     vae.eval()
-    model = nn.DataParallel(model)
-    vae = nn.DataParallel(vae)
+    if args.amp:
+        [model, vae], optimizer = amp.initialize(
+            [model, vae], optimizer, opt_level=args.opt_level)
+
     suffix = suffix + '_proj_dim_{}'.format(args.projection_dim)
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
     wandb.init(config=args, name=suffix.replace("_log/", ''))
