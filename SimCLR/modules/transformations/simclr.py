@@ -1,5 +1,6 @@
 import torchvision
 
+
 class TransformsSimCLR:
     """
     A stochastic data augmentation module that transforms any given data example randomly 
@@ -28,6 +29,7 @@ class TransformsSimCLR:
 
     def __call__(self, x):
         return self.train_transform(x), self.train_transform(x)
+
 
 class TransformsSimCLR_imagenet:
     """

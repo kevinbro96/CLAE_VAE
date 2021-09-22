@@ -12,7 +12,7 @@ from modules import NT_Xent
 from modules.transformations import TransformsSimCLR
 from modules.transformations import TransformsSimCLR_imagenet
 from utils import mask_correlated_samples
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, imagenet100
 import pdb
 sys.path.append('.')
 sys.path.append('..')
@@ -24,6 +24,7 @@ parser.add_argument('--batch_size', default=256, type=int,
                     metavar='B', help='training batch size')
 parser.add_argument('--workers', default=4, type=int, help='workers')
 parser.add_argument('--epochs', default=300, type=int, help='epochs')
+parser.add_argument('--save_epochs', default=100, type=int, help='save epochs')
 parser.add_argument('--resnet', default="resnet18", type=str, help="resnet")
 parser.add_argument('--normalize', default=True, action='store_true', help='normalize')
 parser.add_argument('--projection_dim', default=64, type=int, help='projection_dim')
@@ -145,6 +146,10 @@ def main():
         train_dataset, testset = load_data(root)
         train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet(size=224))
         data = 'imagenet'
+    elif args.dataset == "imagenet100":
+        root = '/gpub/imagenet_raw'
+        train_dataset, testset = imagenet100(root, TransformsSimCLR_imagenet(size=224))
+        data = 'imagenet'
     else:
         raise NotImplementedError
 
@@ -158,6 +163,8 @@ def main():
     )
     testloader = torch.utils.data.DataLoader(testset,
                                              batch_size=100, shuffle=False, num_workers=4)
+
+
     ndata = train_dataset.__len__()
     log_dir = "log/" + args.dataset + '_log/'
 
@@ -223,6 +230,8 @@ def main():
         args.current_epoch += 1
         if args.debug:
             break
+        if epoch % 100 ==0:
+            save_model(args.model_dir + suffix, model, optimizer, epoch)
 
     save_model(args.model_dir + suffix, model, optimizer, args.epochs)
 

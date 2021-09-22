@@ -25,6 +25,7 @@ parser.add_argument('--batch_size', default=256, type=int,
 parser.add_argument('--dim', default=512, type=int, help='CNN_embed_dim')
 parser.add_argument('--workers', default=4, type=int, help='workers')
 parser.add_argument('--epochs', default=300, type=int, help='epochs')
+parser.add_argument('--save_epochs', default=100, type=int, help='save epochs')
 parser.add_argument('--resnet', default="resnet18", type=str, help="resnet")
 parser.add_argument('--normalize', default=True, action='store_true', help='normalize')
 parser.add_argument('--projection_dim', default=64, type=int, help='projection_dim')
@@ -162,19 +163,28 @@ def main():
         train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet(size=224))
         data = 'imagenet'
         vae = CVAE_imagenet_withbn(128, args.dim)
+    elif args.dataset == "imagenet100":
+        root = '/gpub/imagenet_raw'
+        dataset = ImageNet100(data_path=root, transform_train=TransformsSimCLR_imagenet(size=224))
+        data = 'imagenet'
+        vae = CVAE_imagenet_withbn(128, args.dim)
     else:
         raise NotImplementedError
 
-    train_loader = torch.utils.data.DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=(train_sampler is None),
-        drop_last=True,
-        num_workers=args.workers,
-        sampler=train_sampler,
-    )
-    testloader = torch.utils.data.DataLoader(testset,
-                                             batch_size=100, shuffle=False, num_workers=4)
+    if args.dataset != 'imagenet100':
+        train_loader = torch.utils.data.DataLoader(
+            train_dataset,
+            batch_size=args.batch_size,
+            shuffle=(train_sampler is None),
+            drop_last=True,
+            num_workers=args.workers,
+            sampler=train_sampler,
+        )
+        testloader = torch.utils.data.DataLoader(testset,
+                                                 batch_size=100, shuffle=False, num_workers=4)
+    else:
+        train_loader, testloader = dataset.make_loaders(workers=4, batch_size=args.batch_size)
+
     ndata = train_dataset.__len__()
     log_dir = "log/" + args.dataset + '_log/'
 
@@ -193,7 +203,8 @@ def main():
     vae.load_state_dict(torch.load(args.vae_path))
     vae.to(args.device)
     vae.eval()
-
+    model = nn.DataParallel(model)
+    vae = nn.DataParallel(vae)
     suffix = suffix + '_proj_dim_{}'.format(args.projection_dim)
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
     wandb.init(config=args, name=suffix.replace("_log/", ''))
@@ -244,6 +255,8 @@ def main():
         args.current_epoch += 1
         if args.debug:
             break
+        if epoch % 50 == 0:
+            save_model(args.model_dir + suffix, model, optimizer, epoch)
 
     save_model(args.model_dir + suffix, model, optimizer, args.epochs)
 
