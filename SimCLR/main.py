@@ -172,8 +172,14 @@ def main():
     elif args.dataset == "tinyImagenet":
         root = '../../data/tiny_imagenet.pickle'
         train_dataset, testset = load_data(root)
-        train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet(size=224))
+        train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet())
         data = 'imagenet'
+        transform_test = transforms.Compose([
+            transforms.Resize(size=224),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        testset = imagenet(testset, transform=transform_test)
         vae = CVAE_imagenet_withbn(128, args.dim)
     elif args.dataset == "imagenet100":
         root = '/gpub/imagenet_raw'
@@ -243,28 +249,27 @@ def main():
         if epoch > 10:
             scheduler.step()
         print('epoch: {}% \t (loss: {}%)'.format(epoch, loss_epoch / len(train_loader)), file=test_log_file)
-        if args.dataset == 'CIFAR10' or args.dataset == 'CIFAR100':
-            print('----------Evaluation---------')
-            start = time.time()
-            acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
-            print("Evaluation Time: '{}'s".format(time.time() - start))
+        print('----------Evaluation---------')
+        start = time.time()
+        acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
+        print("Evaluation Time: '{}'s".format(time.time() - start))
 
-            if acc >= best_acc:
-                print('Saving..')
-                state = {
-                    'model': model.state_dict(),
-                    'acc': acc,
-                    'epoch': epoch,
-                }
-                if not os.path.isdir(args.model_dir):
-                    os.mkdir(args.model_dir)
-                torch.save(state, args.model_dir + suffix + '_best.t')
-                best_acc = acc
-            print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
-            print('[Epoch]: {}'.format(epoch), file=test_log_file)
-            print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc), file=test_log_file)
-            wandb.log({'acc': acc})
-            test_log_file.flush()
+        if acc >= best_acc:
+            print('Saving..')
+            state = {
+                'model': model.state_dict(),
+                'acc': acc,
+                'epoch': epoch,
+            }
+            if not os.path.isdir(args.model_dir):
+                os.mkdir(args.model_dir)
+            torch.save(state, args.model_dir + suffix + '_best.t')
+            best_acc = acc
+        print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
+        print('[Epoch]: {}'.format(epoch), file=test_log_file)
+        print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc), file=test_log_file)
+        wandb.log({'acc': acc})
+        test_log_file.flush()
 
         args.current_epoch += 1
         if args.debug:
