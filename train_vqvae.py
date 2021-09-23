@@ -24,6 +24,7 @@ sys.path.append('.')
 from vae import *
 from set import *
 from load_imagenet import imagenet, load_data
+from apex import amp
 
 
 def reconst_images(batch_size=64, batch_num=1, dataloader=None, model=None):
@@ -78,7 +79,7 @@ def test(epoch, model, testloader):
         # plot progress
         print("\n| Validation Epoch #%d\t\tRec_gx: %.4f Rec_rx: %.4f " % (epoch, acc_gx_avg.avg, acc_rx_avg.avg))
         reconst_images(batch_size=64, batch_num=2, dataloader=testloader, model=model)
-        torch.save(model.module.state_dict(),
+        torch.save(model.state_dict(),
                    os.path.join(args.save_dir, 'model_epoch{}.pth'.format(epoch + 1)))  # save motion_encoder
         print("Epoch {} model saved!".format(epoch + 1))
 
@@ -129,8 +130,8 @@ def main(args):
     print('\n[Phase 2] : Model setup')
     if use_cuda:
         model.cuda()
-        model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
         cudnn.benchmark = True
+
 
     optimizer = AdamW([
         {'params': model.parameters()},
@@ -138,6 +139,10 @@ def main(args):
 
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lambda epoch: 1 - epoch / args.epochs)
+
+    if args.amp:
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level=args.opt_level)
 
     print('\n[Phase 3] : Training model')
     print('| Training Epochs = ' + str(args.epochs))
@@ -163,7 +168,13 @@ def main(args):
             l_rec = F.mse_loss(x, gx)
             l_kl = torch.mean(torch.norm((emb - z_e.detach())**2, 2, 1)) + 0.5*torch.mean(torch.norm((emb.detach() - z_e)**2, 2, 1))
             loss = l_rec + args.kl * l_kl
-            loss.backward()
+
+            if args.amp:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+
             optimizer.step()
 
             loss_avg.update(loss.data.item(), bs)
@@ -199,6 +210,11 @@ if __name__ == '__main__':
     parser.add_argument('--kdim', default=128, type=int, help='CNN_embed_dim')
     parser.add_argument('--kl', default=1, type=float, help='kl weight')
     parser.add_argument('--simclr', default=False, type=str, help='simclr')
+    parser.add_argument("--amp", action="store_true",
+                        help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+    parser.add_argument("--opt_level", type=str, default="O1",
+                        help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                             "See details at https://nvidia.github.io/apex/amp.html")
     args = parser.parse_args()
     wandb.init(config=args, name=args.save_dir.replace("./results/", ''))
     set_random_seed(args.seed)
