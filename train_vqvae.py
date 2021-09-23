@@ -36,7 +36,7 @@ def reconst_images(batch_size=64, batch_num=1, dataloader=None, model=None):
                 break
             else:
                 X, y = X.cuda(), y.cuda().view(-1, )
-                gx, z_e, emb = model(X)
+                _, gx, z_e, emb = model(X)
 
                 grid_X = torchvision.utils.make_grid(X[:batch_size].data, nrow=8, padding=2, normalize=True)
                 wandb.log({"_Batch_{batch}_X.jpg".format(batch=batch_idx): [
@@ -63,7 +63,7 @@ def test(epoch, model, testloader):
             x, y = x.cuda(), y.cuda().view(-1, )
             bs = x.size(0)
             norm = torch.norm(torch.abs(x.view(bs, -1)), p=2, dim=1)
-            gx, z_e, emb = model(x)
+            _, gx, z_e, emb = model(x)
             acc_gx = 1 - F.mse_loss(torch.div(gx, norm.unsqueeze(1).unsqueeze(2).unsqueeze(3)), \
                                     torch.div(x, norm.unsqueeze(1).unsqueeze(2).unsqueeze(3)), \
                                     reduction='sum') / bs
@@ -162,7 +162,7 @@ def main(args):
             x, y = Variable(x), Variable(y)
             bs = x.size(0)
 
-            gx, z_e, emb = model(x)
+            _, gx, z_e, emb = model(x)
 
             optimizer.zero_grad()
             l_rec = F.mse_loss(x, gx)

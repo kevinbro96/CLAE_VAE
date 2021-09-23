@@ -274,16 +274,21 @@ class VQVAE_imagenet(nn.Module):
     def decode(self, x):
         return torch.tanh(self.decoder(x))
 
-    def forward(self, x):
-        z_e = self.encode(x)
+    def forward(self, x, decode=False):
+        if decode:
+            l = self.decode(x)
+            gx = self.L_bn(l)
 
-        z_q, _ = self.emb(z_e, weight_sg=True)
-        emb, _ = self.emb(z_e.detach())
+            return gx
+        else:
+            z_e = self.encode(x)
 
-        l = self.decode(z_q)
-        xi = self.L_bn(l)
+            z_q, _ = self.emb(z_e, weight_sg=True)
+            emb, _ = self.emb(z_e.detach())
 
-        return xi, z_e, emb
+            l = self.decode(z_q)
+            gx = self.L_bn(l)
+            return z_q, gx, z_e, emb
 
 
 class NearestEmbedFunc(Function):
