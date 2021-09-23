@@ -18,6 +18,8 @@ sys.path.append('..')
 from set import *
 from vae import *
 from apex import amp
+from robustness.tools.helpers import get_label_mapping
+from robustness.tools import folder
 
 
 parser = argparse.ArgumentParser(description=' Seen Testing Category Training')
@@ -133,7 +135,7 @@ def train(args, epoch, train_loader, model, vae, criterion, optimizer):
             wandb.log({'loss_og': loss_og.item(),
                        'loss_adv': loss_adv.item(),
                        'lr': optimizer.param_groups[0]['lr']})
-        if args.global_step % 3000 == 0:
+        if args.global_step % 1000 == 0:
             if args.adv:
                 reconst_images(x_i, gx, x_j_adv)
     return loss_epoch
@@ -180,11 +182,18 @@ def main():
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
         testset = imagenet(testset, transform=transform_test)
-        vae = CVAE_imagenet_withbn(128, args.dim)
+        vae = VQVAE_imagenet(64, args.dim)
     elif args.dataset == "imagenet100":
-        root = '/gpub/imagenet_raw'
-        dataset = ImageNet100(data_path=root, transform_train=TransformsSimCLR_imagenet(size=224))
-        data = 'imagenet'
+        root='/gpub/imagenet_raw'
+        custom_grouping = [[label] for label in range(0, 1000, 10)]
+        ds_name = 'custom_imagenet'
+        label_mapping = get_label_mapping(ds_name, custom_grouping)
+        train_path = os.path.join(root, 'train')
+        test_path = os.path.join(root, 'val')
+        train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(),
+                                       label_mapping=label_mapping)
+        testset = folder.ImageFolder(root=test_path, transform=transform_test,
+                                      label_mapping=label_mapping)
         vae = CVAE_imagenet_withbn(128, args.dim)
     else:
         raise NotImplementedError

@@ -18,6 +18,10 @@ sys.path.append('.')
 sys.path.append('..')
 from set import *
 from eval_knn import kNN
+from apex import amp
+from robustness.tools.helpers import get_label_mapping
+from robustness.tools import folder
+
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing  Training')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -46,19 +50,29 @@ parser.add_argument('--alpha', default=1.0, type=float, help='weight for contras
 parser.add_argument('--debug', default=False, action='store_true', help='debug mode')
 parser.add_argument('--seed', default=1, type=int, help='seed')
 parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
+parser.add_argument("--amp", action="store_true",
+                    help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+parser.add_argument("--opt_level", type=str, default="O1",
+                    help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                         "See details at https://nvidia.github.io/apex/amp.html")
 args = parser.parse_args()
+print(args)
 set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 
-def gen_adv(model, x_i, criterion):
+def gen_adv(model, x_i, criterion, optimizer):
     x_i = x_i.detach()
     h_i, z_i = model(x_i, adv=True)
 
     x_j_adv = Variable(x_i, requires_grad=True).to(args.device)
     h_j_adv, z_j_adv = model(x_j_adv, adv=True)
     tmp_loss = criterion(z_i, z_j_adv)
-    tmp_loss.backward()
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
     x_j_adv.data = x_j_adv.data + (args.eps * torch.sign(x_j_adv.grad.data))
     x_j_adv.grad.data.zero_()
 
@@ -79,7 +93,7 @@ def train(args, epoch, train_loader, model, criterion, optimizer):
         # positive pair, with encoding
         h_i, z_i = model(x_i)
         if args.adv:
-            x_j_adv = gen_adv(model, x_i, criterion)
+            x_j_adv = gen_adv(model, x_i, criterion, optimizer)
         optimizer.zero_grad()
         h_j, z_j = model(x_j)
         loss_og = criterion(z_i, z_j)
@@ -91,7 +105,11 @@ def train(args, epoch, train_loader, model, criterion, optimizer):
             loss = loss_og
             loss_adv = loss_og
 
-        loss.backward()
+        if args.amp:
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
 
         optimizer.step()
 
@@ -144,12 +162,25 @@ def main():
     elif args.dataset == "tinyImagenet":
         root = '../../data/tiny_imagenet.pickle'
         train_dataset, testset = load_data(root)
-        train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet(size=224))
+        train_dataset = imagenet(train_dataset, transform=TransformsSimCLR_imagenet())
         data = 'imagenet'
+        transform_test = transforms.Compose([
+            transforms.Resize(size=224),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        testset = imagenet(testset, transform=transform_test)
     elif args.dataset == "imagenet100":
-        root = '/gpub/imagenet_raw'
-        train_dataset, testset = imagenet100(root, TransformsSimCLR_imagenet(size=224))
-        data = 'imagenet'
+        root='/gpub/imagenet_raw'
+        custom_grouping = [[label] for label in range(0, 1000, 10)]
+        ds_name = 'custom_imagenet'
+        label_mapping = get_label_mapping(ds_name, custom_grouping)
+        train_path = os.path.join(root, 'train')
+        test_path = os.path.join(root, 'val')
+        train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(),
+                                       label_mapping=label_mapping)
+        testset = folder.ImageFolder(root=test_path, transform=transform_test,
+                                      label_mapping=label_mapping)
     else:
         raise NotImplementedError
 
@@ -179,6 +210,9 @@ def main():
     else:
         model, optimizer, scheduler = load_model(args, train_loader, bn_adv_flag=False,
                                                  bn_adv_momentum=args.bn_adv_momentum, data=data)
+    if args.amp:
+        model,  optimizer = amp.initialize(
+            model, optimizer, opt_level=args.opt_level)
 
     suffix = suffix + '_proj_dim_{}'.format(args.projection_dim)
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
@@ -204,28 +238,27 @@ def main():
         if epoch > 10:
             scheduler.step()
         print('epoch: {}% \t (loss: {}%)'.format(epoch, loss_epoch / len(train_loader)), file=test_log_file)
-        if args.dataset == 'CIFAR10' or args.dataset == 'CIFAR100':
-            print('----------Evaluation---------')
-            start = time.time()
-            acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
-            print("Evaluation Time: '{}'s".format(time.time() - start))
+        print('----------Evaluation---------')
+        start = time.time()
+        acc = kNN(epoch, model, train_loader, testloader, 200, args.temperature, ndata, low_dim=args.projection_dim)
+        print("Evaluation Time: '{}'s".format(time.time() - start))
 
-            if acc >= best_acc:
-                print('Saving..')
-                state = {
-                    'model': model.state_dict(),
-                    'acc': acc,
-                    'epoch': epoch,
-                }
-                if not os.path.isdir(args.model_dir):
-                    os.mkdir(args.model_dir)
-                torch.save(state, args.model_dir + suffix + '_best.t')
-                best_acc = acc
-            print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
-            print('[Epoch]: {}'.format(epoch), file=test_log_file)
-            print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc), file=test_log_file)
-            wandb.log({'acc': acc})
-            test_log_file.flush()
+        if acc >= best_acc:
+            print('Saving..')
+            state = {
+                'model': model.state_dict(),
+                'acc': acc,
+                'epoch': epoch,
+            }
+            if not os.path.isdir(args.model_dir):
+                os.mkdir(args.model_dir)
+            torch.save(state, args.model_dir + suffix + '_best.t')
+            best_acc = acc
+        print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
+        print('[Epoch]: {}'.format(epoch), file=test_log_file)
+        print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc), file=test_log_file)
+        wandb.log({'acc': acc})
+        test_log_file.flush()
 
         args.current_epoch += 1
         if args.debug:

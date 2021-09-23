@@ -291,6 +291,74 @@ class VQVAE_imagenet(nn.Module):
             return z_q, gx, z_e, emb
 
 
+class CVAE_imagenet_withbn_v2(AbstractAutoEncoder):
+    def __init__(self, d, z,  **kwargs):
+        super(CVAE_imagenet_withbn_v2, self).__init__()
+
+        self.encoder = nn.Sequential(
+            nn.Conv2d(3, d // 2, kernel_size=4, stride=4, padding=1, bias=False),
+            nn.BatchNorm2d(d // 2),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(d // 2, d, kernel_size=4, stride=4, padding=1, bias=False),
+            nn.BatchNorm2d(d),
+            nn.ReLU(inplace=True),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            ResBlock(d, d, bn=True),
+        )
+
+        self.decoder = nn.Sequential(
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            ResBlock(d, d, bn=True),
+            nn.BatchNorm2d(d),
+            nn.ConvTranspose2d(d, d // 2, kernel_size=4, stride=4, padding=0, bias=False),
+            nn.BatchNorm2d(d // 2),
+            nn.LeakyReLU(inplace=True),
+            nn.ConvTranspose2d(d // 2, 3, kernel_size=4, stride=4, padding=0, bias=False),
+        )
+        self.bn = nn.BatchNorm2d(3)
+        self.f = 14
+        self.d = d
+        self.z = z
+        self.fc11 = nn.Linear(d * self.f ** 2, self.z)
+        self.fc12 = nn.Linear(d * self.f ** 2, self.z)
+        self.fc21 = nn.Linear(self.z, d * self.f ** 2)
+
+    def encode(self, x):
+        h = self.encoder(x)
+        h1 = h.view(-1, self.d * self.f ** 2)
+        return h, self.fc11(h1), self.fc12(h1)
+
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(0.5).exp_()
+            eps = std.new(std.size()).normal_()
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
+    def decode(self, z):
+        z = z.view(-1, self.d, self.f, self.f)
+        h3 = self.decoder(z)
+        return torch.tanh(h3)
+
+    def forward(self, x, decode=False):
+        if decode:
+            z_projected = self.fc21(x)
+            gx = self.decode(z_projected)
+            gx = self.bn(gx)
+            return gx
+        else:
+            _, mu, logvar = self.encode(x)
+            z = self.reparameterize(mu, logvar)
+            z_projected = self.fc21(z)
+            gx = self.decode(z_projected)
+            gx = self.bn(gx)
+        return z, gx, mu, logvar
+
+
+
 class NearestEmbedFunc(Function):
     """
     Input:

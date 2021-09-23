@@ -24,6 +24,7 @@ sys.path.append('.')
 from vae import *
 from set import *
 from load_imagenet import imagenet, load_data, ImageNet100
+from apex import amp
 
 
 def reconst_images(batch_size=64, batch_num=1, dataloader=None, model=None):
@@ -78,7 +79,7 @@ def test(epoch, model, testloader):
         # plot progress
         print("\n| Validation Epoch #%d\t\tRec_gx: %.4f Rec_rx: %.4f " % (epoch, acc_gx_avg.avg, acc_rx_avg.avg))
         reconst_images(batch_size=64, batch_num=2, dataloader=testloader, model=model)
-        torch.save(model.module.state_dict(),
+        torch.save(model.state_dict(),
                    os.path.join(args.save_dir, 'model_epoch{}.pth'.format(epoch + 1)))  # save motion_encoder
         print("Epoch {} model saved!".format(epoch + 1))
 
@@ -140,29 +141,31 @@ def main(args):
         print("| Preparing CIFAR-10 dataset...")
         sys.stdout.write("| ")
         trainset = torchvision.datasets.CIFAR10(root='../data', train=True, download=True, transform=transform_train)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     elif args.dataset == 'cifar100':
         print("| Preparing CIFAR-100 dataset...")
         sys.stdout.write("| ")
         trainset = torchvision.datasets.CIFAR100(root='../data', train=True, download=True, transform=transform_train)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     elif args.dataset == 'tinyimagenet':
         print("| Preparing Tiny-Imagenet dataset...")
         sys.stdout.write("| ")
         trainset, _ = load_data('../data/tiny_imagenet.pickle')
         trainset = imagenet(trainset, transform=transform_train)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4, drop_last=True)
     elif args.dataset == 'imagenet100':
         print("| Preparing imagenet100 dataset...")
         sys.stdout.write("| ")
-        dataset = ImageNet100(data_path='/gpub/imagenet_raw', transform_train=transform_train)
-        trainloader, _ = dataset.make_loaders(workers=4, batch_size=args.batch_size)
-
+        root='/gpub/imagenet_raw'
+        custom_grouping = [[label] for label in range(0, 1000, 10)]
+        ds_name = 'custom_imagenet'
+        label_mapping = get_label_mapping(ds_name, custom_grouping)
+        train_path = os.path.join(root, 'train')
+        trainset = folder.ImageFolder(root=train_path, transform=transform_train,
+                                       label_mapping=label_mapping)
+    trainloader = torch.utils.data.DataLoader(trainset, batch_size=args.batch_size, shuffle=True, num_workers=4,
+                                              drop_last=True)
     # Model
     print('\n[Phase 2] : Model setup')
     if use_cuda:
         model.cuda()
-        model = torch.nn.DataParallel(model, device_ids=range(torch.cuda.device_count()))
         cudnn.benchmark = True
 
     optimizer = AdamW([
@@ -171,6 +174,10 @@ def main(args):
 
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer, lambda epoch: 1 - epoch / args.epochs)
+
+    if args.amp:
+        model, optimizer = amp.initialize(
+            model, optimizer, opt_level=args.opt_level)
 
     print('\n[Phase 3] : Training model')
     print('| Training Epochs = ' + str(args.epochs))
@@ -191,13 +198,18 @@ def main(args):
             bs = x.size(0)
 
             _, gx, mu, logvar = model(x)
-
             optimizer.zero_grad()
             l_rec = F.mse_loss(x, gx)
             l_kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
             l_kl /= bs * 3 * args.dim
             loss = l_rec + args.kl * l_kl
-            loss.backward()
+
+            if args.amp:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
+
             optimizer.step()
 
             loss_avg.update(loss.data.item(), bs)
@@ -232,6 +244,11 @@ if __name__ == '__main__':
     parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
     parser.add_argument('--kl', default=0.1, type=float, help='kl weight')
     parser.add_argument('--mode', default='normal', type=str, help='simclr')
+    parser.add_argument("--amp", action="store_true",
+                        help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+    parser.add_argument("--opt_level", type=str, default="O1",
+                        help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                             "See details at https://nvidia.github.io/apex/amp.html")
     args = parser.parse_args()
     wandb.init(config=args, name=args.save_dir.replace("./results/", ''))
     set_random_seed(args.seed)
