@@ -152,7 +152,7 @@ class ResNetAdvProp_imgnet(nn.Module):
         self.bn_adv_flag = bn_adv_flag
         self.bn_adv_momentum = bn_adv_momentum
         
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3,
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1,
                                bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         if bn_adv_flag:
