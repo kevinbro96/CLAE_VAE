@@ -25,7 +25,7 @@ sys.path.append('.')
 
 from vae import *
 from set import *
-from load_imagenet import imagenet, load_data, ImageNet100
+from load_imagenet import imagenet, load_data, ImageNet100, MiniImageNet
 from apex import amp
 
 
@@ -101,6 +101,11 @@ def main(args):
         normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         model = CVAE_imagenet_withbn(128, args.dim)
         p_blur = 0.5
+    elif args.dataset == 'miniImagenet':
+        size = 84
+        normalizer = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
+        model = CVAE_miniImagenet_withbn(128, args.dim)
+        p_blur = 0.5
     else:
         size = 32
         normalizer = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
@@ -157,6 +162,11 @@ def main(args):
         sys.stdout.write("| ")
         trainset, _ = load_data('../data/tiny_imagenet.pickle')
         trainset = imagenet(trainset, transform=transform_train)
+    elif args.dataset == 'miniImagenet':
+        print("| Preparing Tiny-Imagenet dataset...")
+        sys.stdout.write("| ")
+        root = '../data'
+        trainset = MiniImageNet(root=root, transform=transform_train, train=True)
     elif args.dataset == 'imagenet100':
         print("| Preparing imagenet100 dataset...")
         sys.stdout.write("| ")

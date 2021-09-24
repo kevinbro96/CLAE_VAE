@@ -12,7 +12,7 @@ from modules import NT_Xent
 from modules.transformations import TransformsSimCLR
 from modules.transformations import TransformsSimCLR_imagenet
 from utils import mask_correlated_samples
-from load_imagenet import imagenet, load_data, imagenet100
+from load_imagenet import imagenet, load_data, imagenet100, MiniImageNet
 import pdb
 sys.path.append('.')
 sys.path.append('..')
@@ -186,6 +186,15 @@ def main():
         ])
         testset = folder.ImageFolder(root=test_path, transform=transform_test,
                                       label_mapping=label_mapping)
+    elif args.dataset == 'miniImagenet':
+        root = '../data'
+        train_dataset = MiniImageNet(root=root, transform=TransformsSimCLR_imagenet(size=84), train=True)
+        transform_test = transforms.Compose([
+            transforms.Resize(size=84),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        testset = MiniImageNet(root=root, transform=transform_test, train=False)
     else:
         raise NotImplementedError
 
