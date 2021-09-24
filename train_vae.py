@@ -91,7 +91,12 @@ def main(args):
     use_cuda = torch.cuda.is_available()
     print('\n[Phase 1] : Data Preparation')
 
-    if args.dataset == 'tinyimagenet' or args.dataset == 'imagenet100' :
+    if args.dataset == 'tinyimagenet':
+        size = 64
+        normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        model = CVAE_tinyimagenet_withbn(128, args.dim)
+        p_blur = 0.5
+    elif args.dataset == 'imagenet100':
         size = 224
         normalizer = transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         model = CVAE_imagenet_withbn(128, args.dim)

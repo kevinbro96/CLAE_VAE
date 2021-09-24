@@ -216,6 +216,8 @@ def main():
     for epoch in range(args.logistic_epochs):
         loss_epoch, accuracy_epoch = train(args, train_loader, simclr_model, model, criterion, optimizer)
         print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader), accuracy_epoch / len(train_loader)), file = test_log_file)
+        print("Train Epoch [{}]\t Loss: {}\t Accuracy: {}".format(epoch, loss_epoch / len(train_loader),
+                                                                  accuracy_epoch / len(train_loader)))
         test_log_file.flush()
         wandb.log({'Train/Loss': loss_epoch / len(train_loader),
                    'Train/ACC': accuracy_epoch / len(train_loader)})
@@ -226,6 +228,9 @@ def main():
         if test_current_acc > best_acc:
             best_acc = test_current_acc
         print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch, test_loss_epoch / len(test_loader), test_current_acc, best_acc), file = test_log_file)
+        print("Test Epoch [{}]\t Loss: {}\t Accuracy: {}\t Best Accuracy: {}".format(epoch,
+                                                                                     test_loss_epoch / len(test_loader),
+                                                                                     test_current_acc, best_acc))
         wandb.log({'Test/Loss': test_loss_epoch / len(test_loader),
                    'Test/ACC': test_current_acc,
                    'Test/BestACC': best_acc})
