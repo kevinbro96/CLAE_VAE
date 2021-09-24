@@ -192,6 +192,11 @@ def main():
         test_path = os.path.join(root, 'val')
         train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(),
                                        label_mapping=label_mapping)
+        transform_test = transforms.Compose([
+            transforms.Resize(size=224),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
         testset = folder.ImageFolder(root=test_path, transform=transform_test,
                                       label_mapping=label_mapping)
         vae = CVAE_imagenet_withbn(128, args.dim)
