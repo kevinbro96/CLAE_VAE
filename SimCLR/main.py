@@ -215,19 +215,16 @@ def main():
     else:
         raise NotImplementedError
 
-    if args.dataset != 'imagenet100':
-        train_loader = torch.utils.data.DataLoader(
-            train_dataset,
-            batch_size=args.batch_size,
-            shuffle=(train_sampler is None),
-            drop_last=True,
-            num_workers=args.workers,
-            sampler=train_sampler,
-        )
-        testloader = torch.utils.data.DataLoader(testset,
-                                                 batch_size=100, shuffle=False, num_workers=4)
-    else:
-        train_loader, testloader = dataset.make_loaders(workers=4, batch_size=args.batch_size)
+    train_loader = torch.utils.data.DataLoader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=(train_sampler is None),
+        drop_last=True,
+        num_workers=args.workers,
+        sampler=train_sampler,
+    )
+    testloader = torch.utils.data.DataLoader(testset,
+                                             batch_size=100, shuffle=False, num_workers=4)
 
     ndata = train_dataset.__len__()
     log_dir = "log/" + args.dataset + '_log/'

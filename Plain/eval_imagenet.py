@@ -44,7 +44,7 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
 parser.add_argument('--dataset', default='tinyImagenet',  help='[tinyImagenet]')
-parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type='str', help='adversarial exmaple')
 parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial')
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
@@ -64,6 +64,7 @@ os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 dataset = args.dataset
 
+
 class LogisticRegression(nn.Module):
     
     def __init__(self, n_features, n_classes):
@@ -73,6 +74,7 @@ class LogisticRegression(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
     
 log_dir = args.log_dir  + args.dataset + '_eval_log/'
 test_epoch = args.test_epoch
@@ -87,11 +89,10 @@ if not os.path.isdir(args.model_dir + '/' + dataset + '_eval'):
 
 suffix = args.dataset + '_{}_batch_{}_embed_'.format(args.resnet, args.batch_size)
 suffix = suffix + 'dim{}'.format(args.dim)
-if args.adv:
-    suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
-else:
-    suffix = suffix + '_seed_{}'.format(args.seed)
+
+suffix = suffix + '_method_{}_eps_{}_alpha_{}'.format(args.method, args.eps, args.alpha)
+suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
+
 wandb.init(config=args, name='LR'+suffix.replace("_log/", ''))
    
 print(suffix)
@@ -106,20 +107,35 @@ start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 print('==> Preparing data..')
 
 
-transform = transforms.Compose([
-    transforms.Resize(size=224),
-    transforms.ToTensor(),
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-])
-
 if args.dataset == "tinyImagenet":
     root = '../../data/tiny_imagenet.pickle'
+    transform = transforms.Compose([
+        transforms.Resize(size=[224, 224]),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    train_dataset, test_dataset = load_data(root)
+    train_dataset = imagenetEval(train_dataset, transform=transform)
+    test_dataset = imagenetEval(test_dataset, transform=transform)
+elif args.dataset == 'miniImagenet':
+    root = '/gpub/imagenet_raw'
+    transform = transforms.Compose([
+        transforms.Resize(size=[224, 224]),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    custom_grouping = [[label] for label in range(0, 1000, 10)]
+    ds_name = 'custom_imagenet'
+    data = 'imagenet'
+    label_mapping = get_label_mapping(ds_name, custom_grouping)
+    train_path = os.path.join(root, 'train')
+    test_path = os.path.join(root, 'val')
+    train_dataset = folder.ImageFolder(root=train_path, transform=transform,
+                                       label_mapping=label_mapping)
+    testset = folder.ImageFolder(root=test_path, transform=transform,
+                                 label_mapping=label_mapping)
 else:
     raise NotImplementedError
-
-train_dataset, test_dataset = load_data(root)
-train_dataset = imagenetEval(train_dataset, transform=transform) 
-test_dataset = imagenetEval(test_dataset, transform=transform) 
 
 
 train_loader = torch.utils.data.DataLoader(
@@ -164,6 +180,8 @@ net.eval()
     
 if args.dataset == "tinyImagenet":
     n_classes = 200 # stl-10
+elif args.dataset == 'miniImagenet':
+    n_classes = 100
 
 model = LogisticRegression(args.low_dim, n_classes)
 model = model.to(device)
@@ -220,7 +238,8 @@ def test(loader, net, model, criterion, optimizer):
         if args.debug:
             break
     return loss_epoch, accuracy_epoch
-        
+
+
 best_acc = 0
 for epoch in range(args.logistic_epochs):
     loss_epoch, accuracy_epoch = train(train_loader, net, model, criterion, optimizer)

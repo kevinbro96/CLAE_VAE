@@ -163,7 +163,7 @@ def main(args):
         trainset, _ = load_data('../data/tiny_imagenet.pickle')
         trainset = imagenet(trainset, transform=transform_train)
     elif args.dataset == 'miniImagenet':
-        print("| Preparing Tiny-Imagenet dataset...")
+        print("| Preparing miniImagenet dataset...")
         sys.stdout.write("| ")
         root = '../data'
         trainset = MiniImageNet(root=root, transform=transform_train, train=True)
