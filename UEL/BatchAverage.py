@@ -30,7 +30,7 @@ class BatchCriterion(nn.Module):
         self.T = T
         self.diag_mat = 1 - torch.eye(batchSize*2).cuda()
        
-    def forward(self, x, targets):
+    def forward(self, x):
         batchSize = x.size(0)
         
         #get positive innerproduct

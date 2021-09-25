@@ -79,3 +79,12 @@ def save_model(model_dir, model, optimizer, epoch):
         torch.save(model.module.state_dict(), model_dir + '_epoch_{}.pt'.format(epoch))
     else:
         torch.save(model.state_dict(), model_dir + '_epoch_{}.pt'.format(epoch))
+
+
+def save_model_best(model_dir, model, optimizer):
+    # To save a DataParallel model generically, save the model.module.state_dict().
+    # This way, you have the flexibility to load the model any way you want to any device you want.
+    if isinstance(model, torch.nn.DataParallel):
+        torch.save(model.module.state_dict(), model_dir + '_best.t')
+    else:
+        torch.save(model.state_dict(), model_dir + '_best.t')

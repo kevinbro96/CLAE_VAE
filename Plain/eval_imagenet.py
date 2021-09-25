@@ -21,7 +21,8 @@ import math
 import wandb
 from utils import *
 
-from load_imagenet import imagenetEval, load_data
+from load_imagenet import imagenetEval, load_data, MiniImageNet
+
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--lr', default=3e-4, type=float, help='learning rate')
@@ -44,7 +45,7 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
 parser.add_argument('--dataset', default='tinyImagenet',  help='[tinyImagenet]')
-parser.add_argument('--method', default='normal', type='str', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type=str, help='adversarial exmaple')
 parser.add_argument('--eps', default=0.03, type=float, help='eps for adversarial')
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
@@ -118,22 +119,14 @@ if args.dataset == "tinyImagenet":
     train_dataset = imagenetEval(train_dataset, transform=transform)
     test_dataset = imagenetEval(test_dataset, transform=transform)
 elif args.dataset == 'miniImagenet':
-    root = '/gpub/imagenet_raw'
+    root = '../../data'
     transform = transforms.Compose([
-        transforms.Resize(size=[224, 224]),
+        transforms.Resize(size=[84, 84]),
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    custom_grouping = [[label] for label in range(0, 1000, 10)]
-    ds_name = 'custom_imagenet'
-    data = 'imagenet'
-    label_mapping = get_label_mapping(ds_name, custom_grouping)
-    train_path = os.path.join(root, 'train')
-    test_path = os.path.join(root, 'val')
-    train_dataset = folder.ImageFolder(root=train_path, transform=transform,
-                                       label_mapping=label_mapping)
-    testset = folder.ImageFolder(root=test_path, transform=transform,
-                                 label_mapping=label_mapping)
+    train_dataset = MiniImageNet(root=root, transform=transform, train=True)
+    test_dataset = MiniImageNet(root=root, transform=transform, train=False)
 else:
     raise NotImplementedError
 
@@ -157,19 +150,18 @@ test_loader = torch.utils.data.DataLoader(
 ndata = train_dataset.__len__()
 
 print('==> Building model..')
-if args.adv:
+if args.method != 'normal':
     net = models.__dict__['MyResNet'](args.resnet, low_dim=args.low_dim, bn_adv_flag=True, bn_adv_momentum=args.bn_adv_momentum)
 else:
     net = models.__dict__['MyResNet'](args.resnet, low_dim=args.low_dim, bn_adv_flag=False)
 # define leminiscate: inner product within each mini-batch (Ours)
 
 if device == 'cuda':
-    net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
     cudnn.benchmark = True
 
 
 # Load checkpoint.
-model_path = args.model_dir + '/' + dataset + '/' + suffix + '_best.t'
+model_path = args.model_dir + dataset + '/' + suffix + '_best.t'
 print('==> Load pretrained model {}'.format(model_path))
 
 assert os.path.isdir(args.model_dir), 'Error: no checkpoint directory found!'

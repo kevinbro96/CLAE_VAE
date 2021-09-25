@@ -7,7 +7,7 @@ from model import load_model, save_model
 import sys
 import wandb
 from modules import LogisticRegression
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
 sys.path.append('.')
 sys.path.append('..')
 from set import *
@@ -37,7 +37,7 @@ parser.add_argument('--dataset', default='CIFAR10',
 parser.add_argument('--gpu', default='0', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 parser.add_argument('--trial', type=int, help='trial')
-parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type=str, help='adversarial exmaple')
 parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='batch norm momentum for advprop')
 parser.add_argument('--alpha', default=1.0, type=float, help='weight for contrastive loss with adversarial example')
@@ -127,6 +127,13 @@ def main():
                                      std=[0.229, 0.224, 0.225])
        ])
         data = 'imagenet'
+    elif args.dataset == 'miniImagenet':
+        transform = transforms.Compose([
+            transforms.Resize(size=[84, 84]),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        data = 'imagenet'
     else:
         transform = transforms.Compose([
         torchvision.transforms.Resize(size=32),
@@ -154,6 +161,10 @@ def main():
         train_dataset, test_dataset = load_data(root)
         train_dataset = imagenet(train_dataset, transform=transform)
         test_dataset = imagenet(test_dataset, transform=transform)
+    elif args.dataset == "miniImagenet":
+        root = '../../data'
+        train_dataset = MiniImageNet(root=root, transform=transform, train=True)
+        test_dataset = MiniImageNet(root=root, transform=transform, train=False)
     else:
         raise NotImplementedError
 
@@ -179,29 +190,28 @@ def main():
         os.makedirs(log_dir)
 
     suffix = args.dataset + '_{}_batch_{}'.format(args.resnet, args.batch_size)
-    if args.adv:
-        suffix = suffix + '_alpha_{}_adv_eps_{}'.format(args.alpha, args.eps)
+    suffix = suffix + '_alpha_{}_method_{}_eps_{}'.format(args.alpha, args.method, args.eps)
 
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
     wandb.init(config=args, name='LR/' + suffix.replace("_log/", ''))
     args.model_dir = args.model_dir + args.dataset + '/'
     print("Loading {}".format(args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs)))
-    if args.adv:
-        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs), bn_adv_flag = True, bn_adv_momentum = args.bn_adv_momentum, data=data)
+    if args.method != 'normal':
+        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_best.t', bn_adv_flag = True, bn_adv_momentum = args.bn_adv_momentum, data=data)
     else:
-        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_epoch_{}.pt'.format(args.epochs), bn_adv_flag = False, bn_adv_momentum = args.bn_adv_momentum, data=data)
- 
+        simclr_model, _, _ = load_model(args, train_loader, reload_model=True , load_path = args.model_dir + suffix + '_best.t', bn_adv_flag = False, bn_adv_momentum = args.bn_adv_momentum, data=data)
 
     test_log_file = open(log_dir + suffix + '.txt', "w") 
     simclr_model = simclr_model.to(args.device)
     simclr_model.eval()
-
 
     ## Logistic Regression
     if args.dataset == "CIFAR100":
         n_classes = 100 # stl-10
     elif args.dataset == 'tinyImagenet':
         n_classes = 200
+    elif args.dataset == 'miniImagenet':
+        n_classes = 100
     else:
         n_classes = 10
 
@@ -210,7 +220,6 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)
     criterion = torch.nn.CrossEntropyLoss()
-
 
     best_acc = 0
     for epoch in range(args.logistic_epochs):
@@ -243,8 +252,7 @@ def main():
     if not os.path.isdir("checkpoint/" + args.dataset + '_eval/'):
         os.makedirs("checkpoint/" + args.dataset + '_eval/')
     save_model("checkpoint/" + args.dataset + '_eval/' + suffix, model, optimizer, 0)
-    
-    
-    
+
+
 if __name__ == "__main__":
     main()

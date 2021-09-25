@@ -20,13 +20,14 @@ import math
 import wandb
 from BatchAverage import BatchCriterion
 from utils import *
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
+
 sys.path.append('.')
 sys.path.append('..')
 from vae import *
 from set import *
 import models
-
+from apex import amp
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--lr', default=0.03, type=float, help='learning rate')
@@ -49,10 +50,9 @@ parser.add_argument('--batch-size', default=128, type=int,
 parser.add_argument('--gpu', default='0,1,2,3', type=str,
                       help='gpu device ids for CUDA_VISIBLE_DEVICES')
 
-
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
 parser.add_argument('--dataset', default='tinyImagenet',  help='[tinyImagenet]')
-parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type=str, help='adversarial exmaple')
 parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
@@ -62,13 +62,17 @@ parser.add_argument('--vae_path',
                     type=str, help='vae_path')
 parser.add_argument('--seed', default=1, type=int, help='seed')
 parser.add_argument('--dim', default=128, type=int, help='CNN_embed_dim')
-
+parser.add_argument("--amp", action="store_true",
+                    help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+parser.add_argument("--opt_level", type=str, default="O1",
+                    help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                         "See details at https://nvidia.github.io/apex/amp.html")
 args = parser.parse_args()
 set_random_seed(args.seed)
 os.environ['CUDA_VISIBLE_DEVICES'] = args.gpu
 
 
-def gen_adv(model, vae, x, criterion, indexes):
+def gen_adv(model, vae, x, criterion):
     with torch.no_grad():
         z, gx, _, _ = vae(x)
     variable_bottle = Variable(z.detach(), requires_grad=True)
@@ -77,15 +81,39 @@ def gen_adv(model, vae, x, criterion, indexes):
     adv_feat = model(x_adv, adv = True)
     clean_feat = model(x, adv = True)
     features = torch.cat((clean_feat,adv_feat), 0)
-    tmp_loss = criterion(features, indexes)
-    tmp_loss.backward()
+    tmp_loss = criterion(features)
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
     # generate adversarial example
     with torch.no_grad():
         sign_grad = variable_bottle.grad.data.sign()
         variable_bottle = variable_bottle + args.eps * sign_grad
         adv_gx = vae(variable_bottle, True)
     x_adv.data = adv_gx + (x - gx).detach()
-    return  x_adv.detach(), gx
+    return x_adv.detach(), gx
+
+
+def gen_adv_clae(model, x, criterion):
+    x_adv = Variable(x, requires_grad=True).to(device)
+    adv_feat = model(x_adv, adv=True)
+    feat = model(x, adv=True)
+    features = torch.cat((feat, adv_feat), 0)
+
+    tmp_loss = criterion(features)
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
+
+    # generate adversarial example
+    x_adv.data = x_adv.data + (args.eps * torch.sign(x_adv.grad.data))
+    x_adv.grad.data.zero_()
+    x_adv.requires_grad = False
+    return x_adv
 
 
 dataset = args.dataset
@@ -102,11 +130,10 @@ if not os.path.isdir(args.model_dir + '/' + dataset):
      
 suffix = args.dataset + '_{}_batch_{}_embed_{}'.format(args.resnet, args.batch_size, args.low_dim)
 suffix = suffix + 'dim{}'.format(args.dim)
-if args.adv:
-    suffix = suffix + '_adv_eps_{}_alpha_{}'.format(args.eps, args.alpha)
-    suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
-else:
-    suffix = suffix + '_seed_{}'.format(args.seed)
+
+suffix = suffix + '_method_{}_eps_{}_alpha_{}'.format(args.method, args.eps, args.alpha)
+suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
+
 wandb.init(config=args, name='train'+suffix.replace("_log/", ''))
   
 if len(args.resume)>0:
@@ -122,58 +149,67 @@ device = 'cuda' if torch.cuda.is_available() else 'cpu'
 best_acc = 0  # best test accuracy
 start_epoch = 0  # start from epoch 0 or last checkpoint epoch
 
-# Data Preparation
-print('==> Preparing data..')
-
-transform_train = transforms.Compose([
-    transforms.RandomResizedCrop(size=224, scale=(0.2,1.)),
-    transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
-    transforms.RandomGrayscale(p=0.2),
-    transforms.RandomHorizontalFlip(),
-    transforms.ToTensor(),
-    transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-])
-
 if args.dataset == "tinyImagenet":
+    transform_train = transforms.Compose([
+        transforms.RandomResizedCrop(size=224, scale=(0.2, 1.)),
+        transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
     root = '../../data/tiny_imagenet.pickle'
+    trainset, _ = load_data(root)
+    trainset = imagenet(trainset, transform=transform_train)
+    vae = CVAE_imagenet_withbn(128, args.dim)
+
+elif args.dataset == 'miniImagenet':
+    root = '../../data'
+    data = 'imagenet'
+    trainset = MiniImageNet(root=root, transform=TransformsNormal_imagenet(), train=True)
+    transform_test = transforms.Compose([
+        transforms.Resize(size=[84, 84]),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+    testset = MiniImageNet(root=root, transform=transform_test, train=False)
+    vae = CVAE_miniImagenet_withbn(128, args.dim)
+
 else:
     raise NotImplementedError
 
-trainset, _ = load_data(root)
-trainset = imagenet(trainset, transform=transform_train) 
 trainloader = torch.utils.data.DataLoader(trainset,
         batch_size=args.batch_size, shuffle=True, num_workers=4,drop_last =True)
-
+testloader = torch.utils.data.DataLoader(testset,
+                                         batch_size=100, shuffle=False, num_workers=4)
 
 ndata = trainset.__len__()
 
 print('==> Building model..')
-if args.adv:
+if args.method != 'normal':
     net = models.__dict__['MyResNet'](args.resnet, low_dim=args.low_dim, bn_adv_flag=True, bn_adv_momentum = args.bn_adv_momentum)
 else:
     net = models.__dict__['MyResNet'](args.resnet, low_dim=args.low_dim, bn_adv_flag=False)
 
 # define leminiscate: inner product within each mini-batch (Ours)
-vae = CVAE_imagenet_withbn(128, args.dim)
 vae.load_state_dict(torch.load(args.vae_path))
 
 if device == 'cuda':
-    net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
-    vae = torch.nn.DataParallel(vae, device_ids=range(torch.cuda.device_count()))
     cudnn.benchmark = True
-
-
 # define loss function: inner product loss within each mini-batch
 criterion = BatchCriterion(args.batch_m, args.batch_t, args.batch_size)
-
+# define leminiscate: inner product within each mini-batch (Ours)
+vae.load_state_dict(torch.load(args.vae_path))
 net.to(device)
 criterion.to(device)
 vae.to(device)
 vae.eval()
 
-   
 # define optimizer
 optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
+if args.amp:
+    [net, vae], optimizer = amp.initialize(
+        [net, vae], optimizer, opt_level=args.opt_level)
 
 
 def reconst_images(x_i, gx, x_j_adv):
@@ -217,27 +253,33 @@ def train(epoch):
     net.train()
 
     end = time.time()
-    for batch_idx, (inputs1, inputs2, _, indexes) in enumerate(trainloader):
+    for batch_idx, ((inputs1, inputs2), _) in enumerate(trainloader):
         data_time.update(time.time() - end)
 
-        inputs1, inputs2, indexes = inputs1.to(device), inputs2.to(device), indexes.to(device)
-        
-        if args.adv:
-            inputs_adv, gx = gen_adv(net, vae, inputs1, criterion, indexes)
+        inputs1, inputs2 = inputs1.to(device), inputs2.to(device)
+
+        if args.method == 'clae':
+            inputs_adv = gen_adv_clae(net, inputs1, criterion)
+        elif args.method == 'idaa':
+            inputs_adv, gx = gen_adv(net, vae, inputs1, criterion)
         
         optimizer.zero_grad()
         inputs1_feat = net(inputs1)
         inputs2_feat = net(inputs2)
-        features = torch.cat((inputs1_feat,inputs2_feat), 0)
-        loss_og = criterion(features, indexes)
+        features = torch.cat((inputs1_feat, inputs2_feat), 0)
+        loss_og = criterion(features)
         loss = loss_og
-        if args.adv:
+        if args.method != 'normal':
             adv_feat = net(inputs_adv,adv=True)
-            loss_adv = criterion(torch.cat((inputs1_feat, adv_feat), 0), indexes)
+            loss_adv = criterion(torch.cat((inputs1_feat, adv_feat), 0))
             loss += args.alpha * loss_adv
         else:
             loss_adv = loss_og
-        loss.backward()
+        if args.amp:
+            with amp.scale_loss(loss, optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
         optimizer.step()
         
         train_loss.update(loss.item(), 2*inputs1.size(0))         
@@ -246,7 +288,7 @@ def train(epoch):
         batch_time.update(time.time() - end)
         end = time.time()
         
-        if batch_idx%10 ==0:
+        if batch_idx % 10 == 0:
             wandb.log({'loss_og': loss_og.item(),
                        'loss_adv': loss_adv.item(),
                        'lr': optimizer.param_groups[0]['lr']})
@@ -256,7 +298,7 @@ def train(epoch):
                   'Loss: {train_loss.val:.4f} ({train_loss.avg:.4f})'.format(
                   epoch, batch_idx, len(trainloader), batch_time=batch_time, data_time=data_time, train_loss=train_loss))
         if args.global_step % 3000 == 0:
-            if args.adv:
+            if args.method == 'idaa':
                 reconst_images(inputs1, gx, inputs_adv)
         if args.debug:
             break
@@ -269,16 +311,23 @@ for epoch in range(start_epoch, start_epoch+100):
     
     # training 
     train(epoch)
-    print('Finish epoch {}'.format(epoch), file = test_log_file)
-    state = {
-                'net': net.state_dict(),
-                'epoch': epoch,
-            }
-    if not os.path.isdir(args.model_dir):
-        os.mkdir(args.model_dir)
-    torch.save(state, args.model_dir + '/' + dataset + '/' + suffix + '_best.t')
-
+    print('----------Evaluation---------')
+    start = time.time()
+    acc = kNN_imagenet(epoch, net, trainloader, testloader, 200, args.batch_t, ndata, low_dim=args.low_dim)
+    print("Evaluation Time: '{}'s".format(time.time() - start))
+    if acc >= best_acc:
+        print('Saving..')
+        state = {
+                    'net': net.state_dict(),
+                    'epoch': epoch,
+                    'acc': acc,
+                }
+        if not os.path.isdir(args.model_dir):
+            os.mkdir(args.model_dir)
+        torch.save(state, args.model_dir + '/' + dataset + '/' + suffix + '_best.t')
+        best_acc = acc
+    print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
+    print('[Epoch]: {}'.format(epoch), file=test_log_file)
+    print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc), file=test_log_file)
+    wandb.log({'acc': acc})
     test_log_file.flush()
-
-    if args.debug:
-        break

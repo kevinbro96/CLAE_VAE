@@ -20,13 +20,14 @@ import math
 import wandb
 
 from utils import *
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
 
 sys.path.append('.')
 sys.path.append('..')
 from vae import *
 from set import *
 import models
+from apex import amp
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--lr', default=0.03, type=float, help='learning rate')
@@ -51,7 +52,7 @@ parser.add_argument('--gpu', default='0,1,2,3', type=str,
 
 parser.add_argument('--resnet', default='resnet18',  help='resnet18, resnet34, resnet50, resnet101')
 parser.add_argument('--dataset', default='tinyImagenet',  help='[tinyImagenet]')
-parser.add_argument('--method', default='normal', type='str', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type=str, help='adversarial exmaple')
 parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--alpha', default=1.0, type=float, help='stregnth for regularization')
@@ -100,7 +101,11 @@ def gen_adv_clae(net, x):
     inputs1_adv = Variable(x, requires_grad=True).to(device)
     # generate adversarial example
     tmp_loss = CL(net, x, inputs1_adv, gen_adv = True)
-    tmp_loss.backward()
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
     inputs1_adv.data = inputs1_adv.data + (args.eps * torch.sign(inputs1_adv.grad.data))
     inputs1_adv.grad.data.zero_()
     inputs1_adv.detach()
@@ -175,22 +180,15 @@ if args.dataset == "tinyImagenet":
     vae = CVAE_imagenet_withbn(128, args.dim)
 
 elif args.dataset == 'miniImagenet':
-    root = '/gpub/imagenet_raw'
-    custom_grouping = [[label] for label in range(0, 1000, 10)]
-    ds_name = 'custom_imagenet'
+    root = '../../data'
     data = 'imagenet'
-    label_mapping = get_label_mapping(ds_name, custom_grouping)
-    train_path = os.path.join(root, 'train')
-    test_path = os.path.join(root, 'val')
-    train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(size=[224, 224]),
-                                       label_mapping=label_mapping)
+    trainset = MiniImageNet(root=root, transform=TransformsNormal_imagenet(), train=True)
     transform_test = transforms.Compose([
-        transforms.Resize(size=[224, 224]),
+        transforms.Resize(size=[84, 84]),
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
     ])
-    testset = folder.ImageFolder(root=test_path, transform=transform_test,
-                                 label_mapping=label_mapping)
+    testset = MiniImageNet(root=root, transform=transform_test, train=False)
     vae = CVAE_miniImagenet_withbn(128, args.dim)
 
 else:
@@ -212,7 +210,6 @@ else:
 # define leminiscate: inner product within each mini-batch (Ours)
 
 if device == 'cuda':
-    net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
     cudnn.benchmark = True
 
 vae.load_state_dict(torch.load(args.vae_path))
@@ -269,14 +266,14 @@ def train(epoch):
     net.train()
 
     end = time.time()
-    for batch_idx, (inputs1, inputs2, _, indexes) in enumerate(trainloader):
+    for batch_idx, ((inputs1, inputs2), _) in enumerate(trainloader):
         data_time.update(time.time() - end)
 
-        inputs1, inputs2, indexes = inputs1.to(device), inputs2.to(device), indexes.to(device)
+        inputs1, inputs2 = inputs1.to(device), inputs2.to(device)
         
-        if args.method=='clae':
+        if args.method == 'clae':
             inputs_adv = gen_adv_clae(net, inputs1)
-        elif args.method =='idaa':
+        elif args.method == 'idaa':
             inputs_adv, gx = gen_adv(net, vae, inputs1)
 
         optimizer.zero_grad()
@@ -325,7 +322,7 @@ for epoch in range(start_epoch, start_epoch+100):
     train(epoch)
     print('----------Evaluation---------')
     start = time.time()
-    acc = kNN(epoch, net, trainloader, testloader, 200, args.batch_t, ndata, low_dim=args.low_dim)
+    acc = kNN_imagenet(epoch, net, trainloader, testloader, 200, args.batch_t, ndata, low_dim=args.low_dim)
     print("Evaluation Time: '{}'s".format(time.time() - start))
     if acc >= best_acc:
         print('Saving..')

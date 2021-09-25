@@ -8,6 +8,28 @@ import sklearn
 from sklearn.cluster import KMeans
 from tqdm import tqdm
 
+
+class TransformsNormal_imagenet:
+    """
+    A stochastic data augmentation module that transforms any given data example randomly
+    resulting in two correlated views of the same example,
+    denoted x ̃i and x ̃j, which we consider as a positive pair.
+    """
+
+    def __init__(self, size=84):
+        self.train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(size=size, scale=(0.2, 1.)),
+        transforms.ColorJitter(0.4, 0.4, 0.4, 0.4),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+    ])
+
+    def __call__(self, x):
+        return self.train_transform(x), self.train_transform(x)
+
+
 # def kNN(epoch, net, trainloader, testloader, K, sigma, ndata, low_dim = 128):
 #     net.eval()
 #     net_time = AverageMeter()
@@ -87,6 +109,64 @@ from tqdm import tqdm
 #     print(top1*100./total)
 
 #     return top1*100./total 
+def kNN_imagenet(epoch, net, trainloader, testloader, K, sigma, ndata, low_dim=128):
+    net.eval()
+    total = 0
+    correct_t = 0
+    testsize = testloader.dataset.__len__()
+
+    try:
+        trainLabels = torch.LongTensor(trainloader.dataset.targets).cuda()
+    except:
+        trainLabels = torch.LongTensor(trainloader.dataset.labels).cuda()
+    trainFeatures = np.zeros((low_dim, ndata))
+    trainFeatures = torch.Tensor(trainFeatures).cuda()
+    C = trainLabels.max() + 1
+    C = np.int(C)
+
+    with torch.no_grad():
+        transform_bak = trainloader.dataset.transform
+        trainloader.dataset.transform = testloader.dataset.transform
+        temploader = torch.utils.data.DataLoader(trainloader.dataset, batch_size=256, shuffle=False, num_workers=4)
+        for batch_idx, (inputs, targets) in tqdm(enumerate(temploader)):
+            targets = targets.cuda()
+            batchSize = inputs.size(0)
+            features = net(inputs.cuda())
+            trainFeatures[:, batch_idx * batchSize:batch_idx * batchSize + batchSize] = features.t()
+
+    trainloader.dataset.transform = transform_bak
+    #
+
+    top1 = 0.
+    top5 = 0.
+    with torch.no_grad():
+        retrieval_one_hot = torch.zeros(K, C).cuda()
+        for batch_idx, (inputs, targets) in enumerate(testloader):
+            targets = targets.cuda()
+            batchSize = inputs.size(0)
+            features = net(inputs.cuda())
+            total += targets.size(0)
+
+            dist = torch.mm(features, trainFeatures)
+            yd, yi = dist.topk(K, dim=1, largest=True, sorted=True)
+            candidates = trainLabels.view(1, -1).expand(batchSize, -1)
+            retrieval = torch.gather(candidates, 1, yi)
+            retrieval_one_hot.resize_(batchSize * K, C).zero_()
+            retrieval_one_hot.scatter_(1, retrieval.view(-1, 1), 1)
+            yd_transform = yd.clone().div_(sigma).exp_()
+            probs = torch.sum(torch.mul(retrieval_one_hot.view(batchSize, -1, C), yd_transform.view(batchSize, -1, 1)),
+                              1)
+
+            _, predictions = probs.sort(1, True)
+            # Find which predictions match the target
+            correct = predictions.eq(targets.data.view(-1, 1))
+
+            top1 = top1 + correct.narrow(1, 0, 1).sum().item()
+
+    print(top1 * 100. / total)
+
+    return top1 * 100. / total
+
 
 def kNN(epoch, net, trainloader, testloader, K, sigma, ndata, low_dim = 128):
     net.eval()
@@ -194,7 +274,8 @@ def eval_nmi_recall(epoch, net, lemniscate, testloader, feature_dim = 128):
                   'Eval Time {val_time.val:.3f}s \t'
                   .format(val_time=val_time))
     return recal, nmi 
-    
+
+
 def eval_recall(embedding, label):
     norm = np.sum(embedding*embedding,axis = 1)
     right_num = 0
@@ -206,6 +287,7 @@ def eval_recall(embedding, label):
             right_num = right_num+1
     recall = float(right_num)/float(embedding.shape[0])
     return recall
+
 
 def eval_nmi(embedding, label,  normed_flag = False, fast_kmeans = False):
     unique_id = np.unique(label)
@@ -221,6 +303,7 @@ def eval_nmi(embedding, label,  normed_flag = False, fast_kmeans = False):
     y_kmeans_pred = kmeans.predict(embedding)
     nmi = normalized_mutual_info_score(label, y_kmeans_pred)
     return nmi
+
 
 def eval_recall_K(embedding, label, K_list =None):
     if K_list is None:
@@ -247,7 +330,8 @@ def eval_recall_K(embedding, label, K_list =None):
             continue
         recall_list[i] = recall_list[i]+recall_list[i-1]
     return recall_list
-    
+
+
 class AverageMeter(object):
     """Computes and stores the average and current value""" 
     def __init__(self):
@@ -264,6 +348,7 @@ class AverageMeter(object):
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
 
 def set_bn_to_eval(m):
     # 1. no update for running mean and var

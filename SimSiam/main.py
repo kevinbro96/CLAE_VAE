@@ -7,16 +7,19 @@ from torch.autograd import Variable
 import numpy as np
 import wandb
 import torchvision.transforms as transforms
-from model import load_model, save_model
+from model import load_model, save_model, save_model_best
 from modules import NT_Xent
 from modules.transformations import TransformsSimSiam
 from modules.transformations import TransformsSimSiam_imagenet
+
 from utils import mask_correlated_samples
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
+
 from eval_knn import kNN
 sys.path.append('..')
 from set import *
 from vae import *
+from apex import amp
 
 
 parser = argparse.ArgumentParser(description=' Seen Testing Category Training')
@@ -37,7 +40,7 @@ parser.add_argument('--dataset', default='CIFAR10',
                     help='[CIFAR10, CIFAR100, tinyImagenet]')
 parser.add_argument('--gpu', default='0', type=str,
                     help='gpu device ids for CUDA_VISIBLE_DEVICES')
-parser.add_argument('--adv', default=False, action='store_true', help='adversarial exmaple')
+parser.add_argument('--method', default='normal', type=str, help='adversarial exmaple')
 parser.add_argument('--eps', default=0.01, type=float, help='eps for adversarial')
 parser.add_argument('--bn_adv_momentum', default=0.01, type=float, help='batch norm momentum for advprop')
 parser.add_argument('--alpha', default=1.0, type=float, help='weight for contrastive loss with adversarial example')
@@ -46,7 +49,11 @@ parser.add_argument('--vae_path',
                     default='../results/vae_dim512_kl0.1_simclr/model_epoch92.pth',
                     type=str, help='vae_path')
 parser.add_argument('--seed', default=1, type=int, help='seed')
-
+parser.add_argument("--amp", action="store_true",
+                    help="use 16-bit (mixed) precision through NVIDIA apex AMP")
+parser.add_argument("--opt_level", type=str, default="O1",
+                    help="apex AMP optimization level selected in ['O0', 'O1', 'O2', and 'O3']."
+                         "See details at https://nvidia.github.io/apex/amp.html")
 args = parser.parse_args()
 print(args)
 set_random_seed(args.seed)
@@ -74,6 +81,25 @@ def gen_adv(model, vae, x_i):
     x_j_adv.requires_grad = False
     x_j_adv.detach()
     return x_j_adv, gx
+
+
+def gen_adv_clae(model, x_i):
+    x_i = x_i.detach()
+    h_i, z_i = model(x_i, adv=True)
+
+    x_j_adv = Variable(x_i, requires_grad=True).to(device)
+    h_j_adv, z_j_adv = model(x_j_adv, adv=True)
+    tmp_loss = - F.cosine_similarity(z_j_adv, h_i.detach(), dim=-1).mean()
+    if args.amp:
+        with amp.scale_loss(tmp_loss, optimizer) as scaled_loss:
+            scaled_loss.backward()
+    else:
+        tmp_loss.backward()
+
+    x_j_adv.data = x_j_adv.data + (args.eps * torch.sign(x_j_adv.grad.data))
+    x_j_adv.grad.data.zero_()
+    x_j_adv.detach()
+    return x_j_adv
 
 
 def main():
@@ -118,6 +144,17 @@ def main():
         ])
         testset = imagenet(testset, transform=transform_test)
         vae = CVAE_imagenet_withbn(128, args.dim)
+    elif args.dataset == 'miniImagenet':
+        root = '../../data'
+        data = 'imagenet'
+        train_dataset = MiniImageNet(root=root, transform=TransformsSimSiam_imagenet(image_size=84), train=True)
+        transform_test = transforms.Compose([
+            transforms.Resize(size=[84, 84]),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        testset = MiniImageNet(root=root, transform=transform_test, train=False)
+        vae = CVAE_miniImagenet_withbn(128, args.dim)
     else:
         raise NotImplementedError
 
@@ -138,18 +175,21 @@ def main():
         os.makedirs(log_dir)
 
     suffix = args.dataset + '_{}_batch_{}'.format(args.resnet, args.batch_size)
-    if args.adv:
-        suffix = suffix + '_alpha_{}_adv_eps_{}'.format(args.alpha, args.eps)
+    suffix = suffix + '_alpha_{}_method_{}_eps_{}'.format(args.alpha, args.method, args.eps)
+    if args.method != 'normal':
         model, optimizer, scheduler = load_model(args, train_loader, bn_adv_flag=True,
                                                  bn_adv_momentum=args.bn_adv_momentum, data=data)
     else:
         model, optimizer, scheduler = load_model(args, train_loader, bn_adv_flag=False,
                                                  bn_adv_momentum=args.bn_adv_momentum, data=data)
 
-    if args.adv:
+    if args.method == 'idaa':
         vae.load_state_dict(torch.load(args.vae_path))
         vae.to(args.device)
         vae.eval()
+    if args.amp:
+        [model, vae], optimizer = amp.initialize(
+            [model, vae], optimizer, opt_level=args.opt_level)
 
     suffix = suffix + '_bn_adv_momentum_{}_seed_{}'.format(args.bn_adv_momentum, args.seed)
     wandb.init(config=args, name=suffix.replace("_log/", ''))
@@ -176,13 +216,15 @@ def main():
 
             # positive pair, with encoding
             h_i, z_i = model(x_i)
-            if args.adv:
+            if args.method == 'clae':
+                x_j_adv = gen_adv_clae(model, x_i)
+            elif args.method == 'idaa':
                 x_j_adv, gx = gen_adv(model, vae, x_i)
 
             optimizer.zero_grad()
             h_j, z_j = model(x_j)
             loss_og = - F.cosine_similarity(z_i, h_j.detach(), dim=-1).mean() - F.cosine_similarity(z_j, h_i.detach(), dim=-1).mean()
-            if args.adv:
+            if args.method != 'normal':
                 h_j_adv, z_j_adv = model(x_j_adv, adv=True)
                 loss_adv = - F.cosine_similarity(z_i, h_j_adv.detach(), dim=-1).mean() - F.cosine_similarity(z_j_adv, h_i.detach(), dim=-1).mean()
                 loss = loss_og + args.alpha * loss_adv
@@ -190,7 +232,11 @@ def main():
                 loss = loss_og
                 loss_adv = loss_og
 
-            loss.mean().backward()
+            if args.amp:
+                with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    scaled_loss.backward()
+            else:
+                loss.backward()
 
             optimizer.step()
             scheduler.step()
@@ -208,7 +254,7 @@ def main():
                            'loss_adv': loss_adv.item(),
                            'lr': optimizer.param_groups[0]['lr']})
             if args.global_step % 3000 == 0:
-                if args.adv:
+                if args.method == 'idaa':
                     reconst_images(x_i, gx, x_j_adv)
         model.eval()
         print('epoch: {}% \t (loss: {}%)'.format(epoch, loss_epoch / len(train_loader)), file=test_log_file)
@@ -219,14 +265,9 @@ def main():
 
         if acc >= best_acc:
             print('Saving..')
-            state = {
-                'model': model.state_dict(),
-                'acc': acc,
-                'epoch': epoch,
-            }
             if not os.path.isdir(args.model_dir):
                 os.mkdir(args.model_dir)
-            torch.save(state, args.model_dir + suffix + '_best.t')
+            save_model_best(args.model_dir + suffix, model, optimizer)
             best_acc = acc
         print('accuracy: {}% \t (best acc: {}%)'.format(acc, best_acc))
         print('[Epoch]: {}'.format(epoch), file=test_log_file)
