@@ -184,21 +184,22 @@ def main():
         testset = imagenet(testset, transform=transform_test)
         vae = CVAE_tinyimagenet_withbn(128, args.dim)
     elif args.dataset == "imagenet100":
-        root='/gpub/imagenet_raw'
+        root = '/gpub/imagenet_raw'
         custom_grouping = [[label] for label in range(0, 1000, 10)]
         ds_name = 'custom_imagenet'
+        data = 'imagenet'
         label_mapping = get_label_mapping(ds_name, custom_grouping)
         train_path = os.path.join(root, 'train')
         test_path = os.path.join(root, 'val')
-        train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(),
+        train_dataset = folder.ImageFolder(root=train_path, transform=TransformsSimCLR_imagenet(size=[224, 224]),
                                        label_mapping=label_mapping)
         transform_test = transforms.Compose([
-            transforms.Resize(size=224),
+            transforms.Resize(size=[224, 224]),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
         testset = folder.ImageFolder(root=test_path, transform=transform_test,
-                                       label_mapping=label_mapping)
+                                      label_mapping=label_mapping)
         vae = CVAE_imagenet_withbn(128, args.dim)
     elif args.dataset == 'miniImagenet':
         root = '../../data'
