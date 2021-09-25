@@ -504,7 +504,6 @@ class CVAE_imagenet_withbn_v2(AbstractAutoEncoder):
         return z, gx, mu, logvar
 
 
-
 class NearestEmbedFunc(Function):
     """
     Input:

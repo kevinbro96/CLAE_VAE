@@ -12,7 +12,7 @@ from modules import NT_Xent
 from modules.transformations import TransformsSimCLR
 from modules.transformations import TransformsSimCLR_imagenet
 from utils import mask_correlated_samples
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
 from eval_knn import kNN
 sys.path.append('..')
 from set import *
@@ -198,8 +198,19 @@ def main():
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
         ])
         testset = folder.ImageFolder(root=test_path, transform=transform_test,
-                                      label_mapping=label_mapping)
+                                       label_mapping=label_mapping)
         vae = CVAE_imagenet_withbn(128, args.dim)
+    elif args.dataset == 'miniImagenet':
+        root = '../../data'
+        data = 'imagenet'
+        train_dataset = MiniImageNet(root=root, transform=TransformsSimCLR_imagenet(size=84), train=True)
+        transform_test = transforms.Compose([
+            transforms.Resize(size=84),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        ])
+        testset = MiniImageNet(root=root, transform=transform_test, train=False)
+        vae = CVAE_miniImagenet_withbn(128, args.dim)
     else:
         raise NotImplementedError
 

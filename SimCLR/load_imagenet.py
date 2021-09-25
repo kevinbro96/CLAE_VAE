@@ -8,6 +8,32 @@ from robustness.tools import folder
 import torch
 
 
+class MiniImageNet(torch.utils.data.Dataset):
+
+    def __init__(self, root, transform, train):
+        super(MiniImageNet, self).__init__()
+        if train:
+            self.name = 'train'
+        else:
+            self.name = 'test'
+        with open(os.path.join(root, '{}.pkl'.format(self.name)), 'rb') as f:
+            data_dict = pickle.load(f)
+
+        self.imgs = data_dict['images']
+        self.labels = data_dict['labels']
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.imgs)
+
+    def __getitem__(self, i):
+        img, label = self.imgs[i], self.labels[i]
+        if not torch.is_tensor(img):
+            img = Image.fromarray(img)
+            img = self.transform(img)
+        return img, label
+
+
 def imagenet100(data_path, transform):
     custom_grouping = [[label] for label in range(0, 1000, 10)]
     ds_name = 'custom_imagenet'

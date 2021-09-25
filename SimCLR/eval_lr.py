@@ -7,12 +7,15 @@ from model import load_model, save_model
 import sys
 import wandb
 from modules import LogisticRegression
-from load_imagenet import imagenet, load_data
+from load_imagenet import imagenet, load_data, MiniImageNet
 sys.path.append('.')
 sys.path.append('..')
 from set import *
 from utils import *
 import pdb
+from robustness.tools.helpers import get_label_mapping
+from robustness.tools import folder
+
 
 parser = argparse.ArgumentParser(description='PyTorch Seen Testing Category Training')
 parser.add_argument('--batch_size', default=256, type=int,
@@ -128,6 +131,15 @@ def main():
                                      std=[0.229, 0.224, 0.225])
        ])
         data = 'imagenet'
+    elif args.dataset == 'miniImagenet':
+        transform = transforms.Compose([
+            torchvision.transforms.Resize((224, 224)),
+            transforms.ToTensor(),
+            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                 std=[0.229, 0.224, 0.225])
+        ])
+        data = 'imagenet'
     else:
         transform = transforms.Compose([
         torchvision.transforms.Resize(size=32),
@@ -135,6 +147,7 @@ def main():
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
         ])
         data = 'non_imagenet'
+
 
     if args.dataset == "CIFAR10" :
         train_dataset = torchvision.datasets.CIFAR10(
@@ -155,6 +168,11 @@ def main():
         train_dataset, test_dataset = load_data(root)
         train_dataset = imagenet(train_dataset, transform=transform)
         test_dataset = imagenet(test_dataset, transform=transform)
+    elif args.dataset == 'miniImagenet':
+        root = '../../data'
+        data = 'imagenet'
+        train_dataset = MiniImageNet(root=root, transform=transform, train=True)
+        test_dataset = MiniImageNet(root=root, transform=transform, train=False)
     else:
         raise NotImplementedError
 
@@ -200,7 +218,7 @@ def main():
 
 
     ## Logistic Regression
-    if args.dataset == "CIFAR100":
+    if args.dataset == "CIFAR100" or args.dataset == "miniImagenet" :
         n_classes = 100 # stl-10
     elif args.dataset == 'tinyImagenet':
         n_classes = 200
