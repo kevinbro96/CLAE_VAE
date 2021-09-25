@@ -87,7 +87,7 @@ def gen_adv_clae(model, x_i):
     x_i = x_i.detach()
     h_i, z_i = model(x_i, adv=True)
 
-    x_j_adv = Variable(x_i, requires_grad=True).to(device)
+    x_j_adv = Variable(x_i, requires_grad=True)
     h_j_adv, z_j_adv = model(x_j_adv, adv=True)
     tmp_loss = - F.cosine_similarity(z_j_adv, h_i.detach(), dim=-1).mean()
     if args.amp:
