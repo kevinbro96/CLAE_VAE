@@ -183,10 +183,9 @@ def main():
         model, optimizer, scheduler = load_model(args, train_loader, bn_adv_flag=False,
                                                  bn_adv_momentum=args.bn_adv_momentum, data=data)
 
-    if args.method == 'idaa':
-        vae.load_state_dict(torch.load(args.vae_path))
-        vae.to(args.device)
-        vae.eval()
+    vae.load_state_dict(torch.load(args.vae_path))
+    vae.to(args.device)
+    vae.eval()
     if args.amp:
         [model, vae], optimizer = amp.initialize(
             [model, vae], optimizer, opt_level=args.opt_level)
