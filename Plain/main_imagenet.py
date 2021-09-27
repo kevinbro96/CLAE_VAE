@@ -93,6 +93,7 @@ def gen_adv(net, vae, x):
         adv_gx = vae(variable_bottle, True)
         inputs_adv = adv_gx + (x - gx).detach()
     inputs_adv.detach()
+
     return inputs_adv, gx
 
 
@@ -223,7 +224,9 @@ optimizer = optim.SGD(net.parameters(), lr=args.lr, momentum=0.9, weight_decay=5
 if args.amp:
     [net, vae], optimizer = amp.initialize(
         [net, vae], optimizer, opt_level=args.opt_level)
-
+scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, 100, eta_min=0, last_epoch=-1
+    )
 
 def reconst_images(x_i, gx, x_j_adv):
     grid_X = torchvision.utils.make_grid(x_i[32:96].data, nrow=8, padding=2, normalize=True)
@@ -257,7 +260,6 @@ def adjust_learning_rate(optimizer, epoch):
 # Training
 def train(epoch):
     print('\nEpoch: %d' % epoch)
-    adjust_learning_rate(optimizer, epoch)
     train_loss = AverageMeter()
     data_time = AverageMeter()
     batch_time = AverageMeter()
@@ -320,6 +322,8 @@ for epoch in range(start_epoch, start_epoch+100):
     
     # training 
     train(epoch)
+    if epoch >10: #warm up
+        scheduler.step()
     print('----------Evaluation---------')
     start = time.time()
     acc = kNN_imagenet(epoch, net, trainloader, testloader, 200, args.batch_t, ndata, low_dim=args.low_dim)
